@@ -580,7 +580,7 @@ class Twig_ExpressionParser
 
         if ($function instanceof Twig_SimpleFunction && $function->isDeprecated()) {
             $message = sprintf('Twig Function "%s" is deprecated', $function->getName());
-            if ($test->getAlternative()) {
+            if ($function->getAlternative()) {
                 $message .= sprintf('. Use "%s" instead', $function->getAlternative());
             }
             $message .= sprintf(' in %s at line %d.', $this->parser->getFilename(), $line);
