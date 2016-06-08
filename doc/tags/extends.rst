@@ -131,8 +131,8 @@ to variables from outer scopes:
 Block Shortcuts
 ---------------
 
-For blocks with few content, it's possible to use a shortcut syntax. The
-following constructs do the same:
+For blocks with little content, it's possible to use a shortcut syntax. The
+following constructs do the same thing:
 
 .. code-block:: jinja
 
@@ -161,9 +161,6 @@ the parent template::
     $layout = $twig->loadTemplate('some_layout_template.twig');
 
     $twig->display('template.twig', array('layout' => $layout));
-
-.. versionadded:: 1.2
-    The possibility to pass an array of templates has been added in Twig 1.2.
 
 You can also provide a list of templates that are checked for existence. The
 first template that exists will be used as a parent:

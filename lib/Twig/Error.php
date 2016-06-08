@@ -33,10 +33,9 @@
  */
 class Twig_Error extends Exception
 {
-    protected $lineno;
-    protected $filename;
-    protected $rawMessage;
-    protected $previous;
+    private $lineno;
+    private $filename;
+    private $rawMessage;
 
     /**
      * Constructor.
@@ -57,12 +56,7 @@ class Twig_Error extends Exception
      */
     public function __construct($message, $lineno = -1, $filename = null, Exception $previous = null)
     {
-        if (PHP_VERSION_ID < 50300) {
-            $this->previous = $previous;
-            parent::__construct('');
-        } else {
-            parent::__construct('', 0, $previous);
-        }
+        parent::__construct('', 0, $previous);
 
         $this->lineno = $lineno;
         $this->filename = $filename;
@@ -161,10 +155,7 @@ class Twig_Error extends Exception
         $this->updateRepr();
     }
 
-    /**
-     * @internal
-     */
-    protected function updateRepr()
+    private function updateRepr()
     {
         $this->message = $this->rawMessage;
 
@@ -202,20 +193,12 @@ class Twig_Error extends Exception
         }
     }
 
-    /**
-     * @internal
-     */
-    protected function guessTemplateInfo()
+    private function guessTemplateInfo()
     {
         $template = null;
         $templateClass = null;
 
-        if (PHP_VERSION_ID >= 50306) {
-            $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS | DEBUG_BACKTRACE_PROVIDE_OBJECT);
-        } else {
-            $backtrace = debug_backtrace();
-        }
-
+        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS | DEBUG_BACKTRACE_PROVIDE_OBJECT);
         foreach ($backtrace as $trace) {
             if (isset($trace['object']) && $trace['object'] instanceof Twig_Template && 'Twig_Template' !== get_class($trace['object'])) {
                 $currentClass = get_class($trace['object']);
@@ -245,7 +228,7 @@ class Twig_Error extends Exception
         }
 
         $exceptions = array($e = $this);
-        while (($e instanceof self || method_exists($e, 'getPrevious')) && $e = $e->getPrevious()) {
+        while ($e = $e->getPrevious()) {
             $exceptions[] = $e;
         }
 

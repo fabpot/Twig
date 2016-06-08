@@ -68,8 +68,8 @@ class Twig_Tests_TemplateTest extends PHPUnit_Framework_TestCase
             array('{{ empty_array.a }}', 'Key "a" does not exist as the array is empty in "%s" at line 1', false),
             array('{{ array.a }}', 'Key "a" for array with keys "foo" does not exist in "%s" at line 1', false),
             array('{{ attribute(array, -10) }}', 'Key "-10" for array with keys "foo" does not exist in "%s" at line 1', false),
-            array('{{ array_access.a }}', 'Method "a" for object "Twig_TemplateArrayAccessObject" does not exist in "%s" at line 1', false),
-            array('{% from _self import foo %}{% macro foo(obj) %}{{ obj.missing_method() }}{% endmacro %}{{ foo(array_access) }}', 'Method "missing_method" for object "Twig_TemplateArrayAccessObject" does not exist in "%s" at line 1', false),
+            array('{{ array_access.a }}', 'Neither the property "a" nor one of the methods "a()", "geta()"/"isa()" or "__call()" exist and have public access in class "Twig_TemplateArrayAccessObject" in "%s" at line 1', false),
+            array('{% from _self import foo %}{% macro foo(obj) %}{{ obj.missing_method() }}{% endmacro %}{{ foo(array_access) }}', 'Neither the property "missing_method" nor one of the methods "missing_method()", "getmissing_method()"/"ismissing_method()" or "__call()" exist and have public access in class "Twig_TemplateArrayAccessObject" in "%s" at line 1', false),
             array('{{ magic_exception.test }}', 'An exception has been thrown during the rendering of a template ("Hey! Don\'t try to isset me!") in "%s" at line 1.', false),
             array('{{ object["a"] }}', 'Impossible to access a key "a" on an object of class "stdClass" that does not implement ArrayAccess interface in "%s" at line 1', false),
         );
@@ -286,6 +286,7 @@ class Twig_Tests_TemplateTest extends PHPUnit_Framework_TestCase
             'null' => null,
             '1' => 1,
             'bar' => true,
+            'foo' => true,
             '09' => '09',
             '+4' => '+4',
         );
@@ -314,6 +315,7 @@ class Twig_Tests_TemplateTest extends PHPUnit_Framework_TestCase
             array(true,  1,         1.0),
             array(true,  null,      'null'),
             array(true,  true,      'bar'),
+            array(true,  true,      'foo'),
             array(true,  '09',      '09'),
             array(true,  '+4',      '+4'),
         );
@@ -483,18 +485,19 @@ class Twig_TemplateArrayAccessObject implements ArrayAccess
         'null' => null,
         '1' => 1,
         'bar' => true,
+        'foo' => true,
         '09' => '09',
         '+4' => '+4',
     );
 
     public function offsetExists($name)
     {
-        return array_key_exists($name, $this->attributes);
+        return array_key_exists((string)$name, $this->attributes);
     }
 
     public function offsetGet($name)
     {
-        return array_key_exists($name, $this->attributes) ? $this->attributes[$name] : null;
+        return array_key_exists((string)$name, $this->attributes) ? $this->attributes[$name] : null;
     }
 
     public function offsetSet($name, $value)
@@ -515,6 +518,7 @@ class Twig_TemplateMagicPropertyObject
         'null' => null,
         '1' => 1,
         'bar' => true,
+        'foo' => true,
         '09' => '09',
         '+4' => '+4',
     );
@@ -546,6 +550,7 @@ class Twig_TemplatePropertyObject
     public $zero = 0;
     public $null = null;
     public $bar = true;
+    public $foo = true;
 
     protected $protected = 'protected';
 }
@@ -622,6 +627,11 @@ class Twig_TemplateMethodObject
         return true;
     }
 
+    public function hasFoo()
+    {
+        return true;
+    }
+
     protected function getProtected()
     {
         return 'protected';
@@ -672,7 +682,7 @@ class Twig_TemplateMagicMethodExceptionObject
 
 class CExtDisablingNodeVisitor implements Twig_NodeVisitorInterface
 {
-    public function enterNode(Twig_NodeInterface $node, Twig_Environment $env)
+    public function enterNode(Twig_Node $node, Twig_Environment $env)
     {
         if ($node instanceof Twig_Node_Expression_GetAttr) {
             $node->setAttribute('disable_c_ext', true);
@@ -681,7 +691,7 @@ class CExtDisablingNodeVisitor implements Twig_NodeVisitorInterface
         return $node;
     }
 
-    public function leaveNode(Twig_NodeInterface $node, Twig_Environment $env)
+    public function leaveNode(Twig_Node $node, Twig_Environment $env)
     {
         return $node;
     }

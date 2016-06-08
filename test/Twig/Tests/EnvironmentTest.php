@@ -9,23 +9,8 @@
  * file that was distributed with this source code.
  */
 
-require_once dirname(__FILE__).'/FilesystemHelper.php';
-
 class Twig_Tests_EnvironmentTest extends PHPUnit_Framework_TestCase
 {
-    private $deprecations = array();
-
-    /**
-     * @expectedException        LogicException
-     * @expectedExceptionMessage You must set a loader first.
-     * @group legacy
-     */
-    public function testRenderNoLoader()
-    {
-        $env = new Twig_Environment();
-        $env->render('test');
-    }
-
     public function testAutoescapeOption()
     {
         $loader = new Twig_Loader_Array(array(
@@ -92,7 +77,6 @@ class Twig_Tests_EnvironmentTest extends PHPUnit_Framework_TestCase
         $template = $twig->loadTemplate('index');
         $this->assertEquals('bar', $template->render(array()));
 
-        /* to be uncomment in Twig 2.0
         // globals cannot be added after a template has been loaded
         $twig = new Twig_Environment($this->getMock('Twig_LoaderInterface'));
         $twig->addGlobal('foo', 'foo');
@@ -139,7 +123,6 @@ class Twig_Tests_EnvironmentTest extends PHPUnit_Framework_TestCase
         } catch (LogicException $e) {
             $this->assertFalse(array_key_exists('bar', $twig->getGlobals()));
         }
-        */
     }
 
     public function testCompileSourceInlinesSource()
@@ -277,44 +260,6 @@ class Twig_Tests_EnvironmentTest extends PHPUnit_Framework_TestCase
         $this->assertEquals('Twig_Tests_EnvironmentTest_NodeVisitor', get_class($visitors[2]));
     }
 
-    /**
-     * @requires PHP 5.3
-     */
-    public function testAddExtensionWithDeprecatedGetGlobals()
-    {
-        $twig = new Twig_Environment($this->getMock('Twig_LoaderInterface'));
-        $twig->addExtension(new Twig_Tests_EnvironmentTest_Extension_WithGlobals());
-
-        $this->deprecations = array();
-        set_error_handler(array($this, 'handleError'));
-
-        $this->assertArrayHasKey('foo_global', $twig->getGlobals());
-
-        $this->assertCount(1, $this->deprecations);
-        $this->assertContains('Defining the getGlobals() method in the "environment_test" extension ', $this->deprecations[0]);
-
-        restore_error_handler();
-    }
-
-    /**
-     * @group legacy
-     */
-    public function testRemoveExtension()
-    {
-        $twig = new Twig_Environment($this->getMock('Twig_LoaderInterface'));
-        $twig->addExtension(new Twig_Tests_EnvironmentTest_Extension());
-        $twig->removeExtension('environment_test');
-
-        $this->assertFalse(array_key_exists('test', $twig->getTags()));
-        $this->assertFalse(array_key_exists('foo_filter', $twig->getFilters()));
-        $this->assertFalse(array_key_exists('foo_function', $twig->getFunctions()));
-        $this->assertFalse(array_key_exists('foo_test', $twig->getTests()));
-        $this->assertFalse(array_key_exists('foo_unary', $twig->getUnaryOperators()));
-        $this->assertFalse(array_key_exists('foo_binary', $twig->getBinaryOperators()));
-        $this->assertFalse(array_key_exists('foo_global', $twig->getGlobals()));
-        $this->assertCount(2, $twig->getNodeVisitors());
-    }
-
     public function testAddMockExtension()
     {
         $extension = $this->getMock('Twig_ExtensionInterface');
@@ -340,49 +285,14 @@ class Twig_Tests_EnvironmentTest extends PHPUnit_Framework_TestCase
     }
 
     /**
-     * @requires PHP 5.3
-     */
-    public function testInitRuntimeWithAnExtensionUsingInitRuntimeDeprecation()
-    {
-        $twig = new Twig_Environment($this->getMock('Twig_LoaderInterface'));
-        $twig->addExtension(new Twig_Tests_EnvironmentTest_ExtensionWithDeprecationInitRuntime());
-
-        $this->deprecations = array();
-        set_error_handler(array($this, 'handleError'));
-
-        $twig->initRuntime();
-
-        $this->assertCount(1, $this->deprecations);
-        $this->assertContains('Defining the initRuntime() method in the "with_deprecation" extension is deprecated since version 1.23.', $this->deprecations[0]);
-
-        restore_error_handler();
-    }
-
-    public function handleError($type, $msg)
-    {
-        if (E_USER_DEPRECATED === $type) {
-            $this->deprecations[] = $msg;
-        }
-    }
-
-    /**
-     * @requires PHP 5.3
+     * @expectedException LogicException
+     * @expectedExceptionMessage Unable to register extension "environment_test" as it is already registered.
      */
     public function testOverrideExtension()
     {
         $twig = new Twig_Environment($this->getMock('Twig_LoaderInterface'));
-        $twig->addExtension(new Twig_Tests_EnvironmentTest_ExtensionWithDeprecationInitRuntime());
-
-        $this->deprecations = array();
-        set_error_handler(array($this, 'handleError'));
-
         $twig->addExtension(new Twig_Tests_EnvironmentTest_Extension());
         $twig->addExtension(new Twig_Tests_EnvironmentTest_Extension());
-
-        $this->assertCount(1, $this->deprecations);
-        $this->assertContains('The possibility to register the same extension twice', $this->deprecations[0]);
-
-        restore_error_handler();
     }
 
     protected function getMockLoader($templateName, $templateContent)
@@ -435,21 +345,21 @@ class Twig_Tests_EnvironmentTest_Extension extends Twig_Extension implements Twi
     public function getFilters()
     {
         return array(
-            new Twig_SimpleFilter('foo_filter', 'foo_filter'),
+            new Twig_Filter('foo_filter'),
         );
     }
 
     public function getTests()
     {
         return array(
-            new Twig_SimpleTest('foo_test', 'foo_test'),
+            new Twig_Test('foo_test'),
         );
     }
 
     public function getFunctions()
     {
         return array(
-            new Twig_SimpleFunction('foo_function', 'foo_function'),
+            new Twig_Function('foo_function'),
         );
     }
 
@@ -488,12 +398,12 @@ class Twig_Tests_EnvironmentTest_TokenParser extends Twig_TokenParser
 
 class Twig_Tests_EnvironmentTest_NodeVisitor implements Twig_NodeVisitorInterface
 {
-    public function enterNode(Twig_NodeInterface $node, Twig_Environment $env)
+    public function enterNode(Twig_Node $node, Twig_Environment $env)
     {
         return $node;
     }
 
-    public function leaveNode(Twig_NodeInterface $node, Twig_Environment $env)
+    public function leaveNode(Twig_Node $node, Twig_Environment $env)
     {
         return $node;
     }

@@ -27,7 +27,8 @@
         "forum": "https://groups.google.com/forum/#!forum/twig-users"
     },
     "require": {
-        "php": ">=5.2.7"
+        "php": ">=5.5",
+        "symfony/polyfill-mbstring": "~1.0"
     },
     "require-dev": {
         "symfony/phpunit-bridge": "~2.7",
@@ -38,9 +39,15 @@
             "Twig_" : "lib/"
         }
     },
+    "autoload-dev": {
+        "psr-0" : {
+            "Twig_Tests_" : "test/"
+        }
+    },
     "extra": {
         "branch-alias": {
-            "dev-master": "1.24-dev"
+            "dev-master": "2.0-dev"
         }
-    }
+    },
+    "minimum-stability": "dev"
 }
