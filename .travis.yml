@@ -13,7 +13,7 @@ before_install:
 install:
     - travis_retry composer install
 
-script: SYMFONY_PHPUNIT_VERSION=8.2 ./vendor/bin/simple-phpunit
+script: ./vendor/bin/simple-phpunit
 
 jobs:
     fast_finish: true
@@ -23,6 +23,7 @@ jobs:
         - php: 7.2
         - php: 7.3
         - php: 7.4snapshot
+          script: SYMFONY_PHPUNIT_VERSION=8.2 ./vendor/bin/simple-phpunit
         - stage: integration tests
           php: 7.3
           script: ./drupal_test.sh
