@@ -6,7 +6,8 @@ set -e
 REPO=`pwd`
 cd /tmp
 rm -rf drupal-twig-test
-composer create-project --no-interaction drupal-composer/drupal-project:8.x-dev drupal-twig-test
+COMPOSER=`which composer`
+php -d memory_limit=-1 $COMPOSER create-project --no-interaction drupal-composer/drupal-project:8.x-dev drupal-twig-test
 cd drupal-twig-test
 (cd vendor/twig && rm -rf twig && ln -sf $REPO twig)
 echo '$config["system.logging"]["error_level"] = "verbose";' >> web/sites/default/settings.php
