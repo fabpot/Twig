@@ -58,11 +58,6 @@ If your cache implementation supports tags, you can also tag your cache items:
         Some code
     {% endcache %}
 
-.. tip::
-
-    Twig automatically adds a ``twig`` tag to all caches which allows to clear
-    all Twig template caches easily.
-
 .. note::
 
     The ``cache`` tag is part of the ``CacheExtension`` which is not installed
@@ -89,13 +84,14 @@ If your cache implementation supports tags, you can also tag your cache items:
     If you are not using Symfony, you must also register the extension runtime::
 
         use Symfony\Component\Cache\Adapter\FilesystemAdapter;
+        use Symfony\Component\Cache\Adapter\TagAwareAdapter;
         use Twig\Extra\Cache\CacheRuntime;
         use Twig\RuntimeLoader\RuntimeLoaderInterface;
 
         $twig->addRuntimeLoader(new class implements RuntimeLoaderInterface {
             public function load($class) {
                 if (CacheRuntime::class === $class) {
-                    return new CacheRuntime(new FilesystemAdapter());
+                    return new CacheRuntime(new TagAwareAdapter(new FilesystemAdapter()));
                 }
             }
         });
