@@ -23,13 +23,15 @@ use Twig\TwigFilter;
 
 final class StringExtension extends AbstractExtension
 {
-    private $slugger;
     private $frenchInflector;
     private $englishInflector;
 
-    public function __construct(?SluggerInterface $slugger = null)
-    {
-        $this->slugger = $slugger ?: new AsciiSlugger();
+    public function __construct(
+        private ?SluggerInterface $slugger = null
+    ) {
+        if (!interface_exists(SluggerInterface::class)) {
+            throw new \LogicException('You cannot use the "String" extension as the "symfony/string" package is not installed. Try running "composer require symfony/string".');
+        }
     }
 
     public function getFilters(): array
@@ -49,6 +51,10 @@ final class StringExtension extends AbstractExtension
 
     public function createSlug(string $string, string $separator = '-', ?string $locale = null): AbstractUnicodeString
     {
+        if (!$this->slugger) {
+            $this->slugger = new AsciiSlugger();
+        }
+
         return $this->slugger->slug($string, $separator, $locale);
     }
 
