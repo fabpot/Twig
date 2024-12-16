@@ -1,6 +1,6 @@
 # 3.19.0 (2025-XX-XX)
 
- * n/a
+ * Add a way to stream template rendering (`TemplateWrapper::stream()` and `TemplateWrapper::streamBlock()` )
 
 # 3.18.0 (2024-12-29)
 
