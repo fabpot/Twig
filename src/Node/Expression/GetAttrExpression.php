@@ -32,7 +32,7 @@ class GetAttrExpression extends AbstractExpression
             trigger_deprecation('twig/twig', '3.15', \sprintf('Not passing a "%s" instance as the "arguments" argument of the "%s" constructor is deprecated ("%s" given).', ArrayExpression::class, static::class, $arguments::class));
         }
 
-        parent::__construct($nodes, ['type' => $type, 'is_defined_test' => false, 'ignore_strict_check' => false, 'optimizable' => true], $lineno);
+        parent::__construct($nodes, ['type' => $type, 'is_defined_test' => false, 'ignore_strict_check' => false, 'optimizable' => true, 'is_typed' => false], $lineno);
     }
 
     public function compile(Compiler $compiler): void
@@ -47,6 +47,18 @@ class GetAttrExpression extends AbstractExpression
             && !$this->getAttribute('is_defined_test')
             && Template::ARRAY_CALL === $this->getAttribute('type')
         ) {
+            if ($this->getAttribute('is_typed') && !$env->hasExtension(SandboxExtension::class)) {
+                $compiler
+                    ->raw('(')
+                    ->subcompile($this->getNode('node'))
+                    ->raw('[')
+                    ->subcompile($this->getNode('attribute'))
+                    ->raw('] ?? null)')
+                ;
+
+                return;
+            }
+
             $var = '$'.$compiler->getVarName();
             $compiler
                 ->raw('(('.$var.' = ')
