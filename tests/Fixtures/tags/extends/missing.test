@@ -1,0 +1,13 @@
+--TEST--
+"extends" tag
+--TEMPLATE--
+{% include 'static.twig' %}
+--TEMPLATE(static.twig)--
+
+
+
+{% extends 'invalid.twig' %}
+--DATA--
+return []
+--EXCEPTION--
+Twig\Error\LoaderError: Template "invalid.twig" is not defined in "static.twig" at line 5.
