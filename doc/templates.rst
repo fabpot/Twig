@@ -959,10 +959,12 @@ The following operators don't fit into any of the other categories:
       * check if ``user`` is a PHP array or an ArrayObject/ArrayAccess object and
         ``name`` a valid element;
       * if not, and if ``user`` is a PHP object, check that ``name`` is a valid property;
+      * if not, and if ``user`` is a PHP object, check that the alternative name
+        (snake_case or camelCase equivalent) is a valid property;
       * if not, and if ``user`` is a PHP object, check that ``name`` is a class constant;
       * if not, and if ``user`` is a PHP object, check the following methods and
         call the first valid one: ``name()``, ``getName()``, ``isName()``, or
-        ``hasName()``;
+        ``hasName()`` (and their snake_case/camelCase equivalents);
       * if not, and if ``strict_variables`` is ``false``, return ``null``;
       * if not, throw an exception.
 
@@ -986,6 +988,34 @@ The following operators don't fit into any of the other categories:
         ``isName()``, or ``hasName()`` method;
       * if not, and if ``strict_variables`` is ``false``, return ``null``;
       * if not, throw an exception.
+
+  .. note::
+
+      snake_case and camelCase names are interchangeable when accessing object
+      properties and methods. For example, given a PHP class with a
+      ``getFirstName()`` method or a ``$firstName`` property, the following
+      are all equivalent in Twig:
+
+      .. code-block:: twig
+
+          {{ user.firstName }}
+          {{ user.first_name }}
+
+      Similarly, if a PHP class uses snake_case conventions (e.g., a
+      ``get_first_name()`` method or a ``$first_name`` property), you can
+      access it using either style:
+
+      .. code-block:: twig
+
+          {{ user.first_name }}
+          {{ user.firstName }}
+
+      This makes templates independent of the naming convention used in the
+      underlying PHP code.
+
+      .. versionadded:: 3.24
+
+          The snake_case/camelCase interchangeability was added in Twig 3.24.
 
 * ``?:``: The ternary operator:
 

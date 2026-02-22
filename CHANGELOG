@@ -3,6 +3,11 @@
  * Add support for renaming variables in object destructuring (`{name: userName} = user`)
  * Add `html_attr_relaxed` escaping strategy that preserves :, @, [, and ] for front-end framework attribute names
  * Add support for short-circuiting in null-safe operator chains
+ * [BC BREAK] Add support for snake_case/camelCase interchangeability when
+   accessing object methods and properties via the dot operator;
+   this can be a BC break if you rely on a property or method not being found
+   when using the "wrong" naming convention (e.g. ``obj.some_thing`` now
+   resolves to ``$someThing`` or ``getSomeThing()``)
 
 # 3.23.0 (2026-01-23)
 

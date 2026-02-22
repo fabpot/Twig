@@ -1782,24 +1782,50 @@ final class CoreExtension extends AbstractExtension
                 try {
                     $env->getExtension(SandboxExtension::class)->checkPropertyAllowed($object, $item, $lineno, $source);
                 } catch (SecurityNotAllowedPropertyError $propertyNotAllowedError) {
-                    goto methodCheck;
+                    // try the alternative name (snake_case <-> camelCase) before giving up on properties
+                    $altItem = self::snakeToCamel($item);
+                    if ($altItem === $item) {
+                        $altItem = self::camelToSnake($item);
+                    }
+                    if ($altItem !== $item) {
+                        try {
+                            $env->getExtension(SandboxExtension::class)->checkPropertyAllowed($object, $altItem, $lineno, $source);
+                            $propertyNotAllowedError = null;
+                            $item = $altItem;
+                        } catch (SecurityNotAllowedPropertyError) {
+                        }
+                    }
+
+                    if ($propertyNotAllowedError) {
+                        goto methodCheck;
+                    }
                 }
             }
 
             static $propertyCheckers = [];
+            static $propertyAlternativeNames = [];
 
             if ($object instanceof \Closure && '__invoke' === $item) {
                 return $isDefinedTest ? true : $object();
             }
 
-            if (isset($object->$item)
-                || ($propertyCheckers[$object::class][$item] ??= self::getPropertyChecker($object::class, $item))($object, $item)
+            $propertyItem = $item;
+            if (!(isset($object->$item)
+                || ($propertyCheckers[$object::class][$item] ??= self::getPropertyChecker($object::class, $item))($object, $item))
             ) {
+                // try alternative name (snake_case <-> camelCase) via per-class property alias map
+                $propertyItem = ($propertyAlternativeNames[$object::class] ??= self::getPropertyAlternativeNames($object::class))[$item] ?? null;
+                if (null === $propertyItem || !(isset($object->$propertyItem) || ($propertyCheckers[$object::class][$propertyItem] ??= self::getPropertyChecker($object::class, $propertyItem))($object, $propertyItem))) {
+                    $propertyItem = null;
+                }
+            }
+
+            if (null !== $propertyItem) {
                 if ($isDefinedTest) {
                     return true;
                 }
 
-                return $object->$item;
+                return $object->$propertyItem;
             }
 
             if ($object instanceof \DateTimeInterface && \in_array($item, ['date', 'timezone', 'timezone_type'], true)) {
@@ -1840,14 +1866,17 @@ final class CoreExtension extends AbstractExtension
                 $classCache[$lcName = $lcMethods[$i]] = $method;
 
                 if ('g' === $lcName[0] && str_starts_with($lcName, 'get')) {
-                    $name = substr($method, 3);
-                    $lcName = substr($lcName, 3);
+                    $prefixLen = '_' === ($lcName[3] ?? '') ? 4 : 3;
+                    $name = substr($method, $prefixLen);
+                    $lcName = substr($lcName, $prefixLen);
                 } elseif ('i' === $lcName[0] && str_starts_with($lcName, 'is')) {
-                    $name = substr($method, 2);
-                    $lcName = substr($lcName, 2);
+                    $prefixLen = '_' === ($lcName[2] ?? '') ? 3 : 2;
+                    $name = substr($method, $prefixLen);
+                    $lcName = substr($lcName, $prefixLen);
                 } elseif ('h' === $lcName[0] && str_starts_with($lcName, 'has')) {
-                    $name = substr($method, 3);
-                    $lcName = substr($lcName, 3);
+                    $prefixLen = '_' === ($lcName[3] ?? '') ? 4 : 3;
+                    $name = substr($method, $prefixLen);
+                    $lcName = substr($lcName, $prefixLen);
                     if (\in_array('is'.$lcName, $lcMethods, true)) {
                         continue;
                     }
@@ -1866,6 +1895,18 @@ final class CoreExtension extends AbstractExtension
                     }
                 }
             }
+
+            // add snake_case <-> camelCase variants
+            foreach ($classCache as $key => $method) {
+                $altKey = self::camelToSnake($key);
+                if ($altKey === $key) {
+                    $altKey = self::snakeToCamel($key);
+                }
+                if ($altKey !== $key && !isset($classCache[$altKey])) {
+                    $classCache[$altKey] = $method;
+                }
+            }
+
             $cache[$class] = $classCache;
         }
 
@@ -2172,6 +2213,64 @@ final class CoreExtension extends AbstractExtension
         */
 
         return new GetAttrExpression($args[0], $args[1], $args[2] ?? null, Template::ANY_CALL, $line);
+    }
+
+    /**
+     * Converts a camelCase string to snake_case.
+     *
+     * Only converts when the string contains mixed case (both upper and lower).
+     *
+     * Examples: "camelCase" -> "camel_case", "HTMLParser" -> "html_parser"
+     */
+    private static function camelToSnake(string $value): string
+    {
+        static $cache = [];
+
+        return $cache[$value] ??= \strlen($value) > 1 && !ctype_lower($value) && !ctype_upper($value) && !str_contains($value, '_')
+            ? strtolower(preg_replace(['/(?<=[a-z\d])([A-Z])/', '/(?<=[A-Z])([A-Z])(?=[a-z])/'], '_$1', $value))
+            : $value;
+    }
+
+    /**
+     * Converts a snake_case string to camelCase.
+     *
+     * Examples: "camel_case" -> "camelCase", "http_response_code" -> "httpResponseCode"
+     */
+    private static function snakeToCamel(string $value): string
+    {
+        static $cache = [];
+
+        return $cache[$value] ??= str_contains($value, '_')
+            ? lcfirst(str_replace('_', '', ucwords($value, '_')))
+            : $value;
+    }
+
+    /**
+     * Returns a map of alternative property names for a class.
+     *
+     * Maps snake_case to camelCase and vice versa for all public instance properties.
+     * Built once per class and cached.
+     *
+     * @return array<string, string> Map of alternative name => real property name
+     */
+    private static function getPropertyAlternativeNames(string $class): array
+    {
+        $map = [];
+        foreach ((new \ReflectionClass($class))->getProperties(\ReflectionProperty::IS_PUBLIC) as $prop) {
+            if ($prop->isStatic()) {
+                continue;
+            }
+            $name = $prop->getName();
+            $alt = self::camelToSnake($name);
+            if ($alt === $name) {
+                $alt = self::snakeToCamel($name);
+            }
+            if ($alt !== $name && !isset($map[$alt])) {
+                $map[$alt] = $name;
+            }
+        }
+
+        return $map;
     }
 
     private static function getPropertyChecker(string $class, string $property): \Closure

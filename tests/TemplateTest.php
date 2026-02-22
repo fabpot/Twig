@@ -428,6 +428,185 @@ class TemplateTest extends TestCase
         // 0 should be in the method cache now, so this should fail
         $this->assertNull(CoreExtension::getAttribute($twig, $template->getSourceContext(), $getIsObject, 0));
     }
+
+    /**
+     * @dataProvider getSnakeCaseToCamelCaseTests
+     */
+    public function testSnakeCaseToCamelCaseMethodAccess($item, $expectedValue)
+    {
+        $twig = new Environment(new ArrayLoader());
+        $template = new TemplateForTest($twig, 'index.twig');
+        $object = new TemplateCamelCaseMethodObject();
+
+        $this->assertEquals($expectedValue, CoreExtension::getAttribute($twig, $template->getSourceContext(), $object, $item, [], Template::ANY_CALL));
+    }
+
+    /**
+     * @dataProvider getSnakeCaseToCamelCaseTests
+     */
+    public function testSnakeCaseToCamelCaseMethodAccessDefined($item)
+    {
+        $twig = new Environment(new ArrayLoader());
+        $template = new TemplateForTest($twig, 'index.twig');
+        $object = new TemplateCamelCaseMethodObject();
+
+        $this->assertTrue(CoreExtension::getAttribute($twig, $template->getSourceContext(), $object, $item, [], Template::ANY_CALL, true));
+    }
+
+    public static function getSnakeCaseToCamelCaseTests()
+    {
+        return [
+            // camelCase method accessed via snake_case
+            ['camel_case', 'camelcase'],
+            // camelCase method accessed directly
+            ['camelCase', 'camelcase'],
+            // camelCase method accessed via lowercase
+            ['camelcase', 'camelcase'],
+            // snake_case for getter (getHTTPResponseCode -> http_response_code)
+            ['http_response_code', 'httpresponsecode'],
+            ['HTTPResponseCode', 'httpresponsecode'],
+            // snake_case for getter with underscore in original (get_http2_response)
+            ['http2_response', 'http2_response'],
+            // Property accessed via snake_case
+            ['response_code', 'responseCode'],
+            // Property accessed directly
+            ['responseCode', 'responseCode'],
+        ];
+    }
+
+    /**
+     * @dataProvider getSnakeCasePropertyTests
+     */
+    public function testSnakeCasePropertyAccess($item, $expectedValue)
+    {
+        $twig = new Environment(new ArrayLoader());
+        $template = new TemplateForTest($twig, 'index.twig');
+        $object = new TemplateCamelCasePropertyObject();
+
+        $this->assertEquals($expectedValue, CoreExtension::getAttribute($twig, $template->getSourceContext(), $object, $item, [], Template::ANY_CALL));
+    }
+
+    public static function getSnakeCasePropertyTests()
+    {
+        return [
+            // Direct property access
+            ['camelCase', 'camelCase_value'],
+            // snake_case -> camelCase property
+            ['camel_case', 'camelCase_value'],
+            // Direct property access
+            ['simpleProperty', 'simple_value'],
+            // snake_case -> camelCase
+            ['simple_property', 'simple_value'],
+        ];
+    }
+
+    /**
+     * @dataProvider getSnakeCaseSandboxTests
+     */
+    public function testSnakeCaseWithSandbox(string $template, string $expectedValue, array $allowedMethods = [], array $allowedProperties = [])
+    {
+        $loader = new ArrayLoader(['index' => $template]);
+        $twig = new Environment($loader, ['autoescape' => false]);
+        $policy = new SecurityPolicy([], [], $allowedMethods, $allowedProperties, []);
+        $twig->addExtension(new SandboxExtension($policy, true));
+
+        $this->assertEquals($expectedValue, $twig->load('index')->render([
+            'obj' => new TemplateCamelCaseMethodObject(),
+            'prop_obj' => new TemplateCamelCasePropertyObject(),
+        ]));
+    }
+
+    public static function getSnakeCaseSandboxTests()
+    {
+        return [
+            // Allow camelCase method, access via snake_case
+            ['{{ obj.camel_case }}', 'camelcase', ['Twig\Tests\TemplateCamelCaseMethodObject' => ['getCamelCase']]],
+            // Allow camelCase method directly
+            ['{{ obj.camelCase }}', 'camelcase', ['Twig\Tests\TemplateCamelCaseMethodObject' => ['getCamelCase']]],
+            // Allow property with camelCase name, access via snake_case
+            ['{{ prop_obj.camel_case }}', 'camelCase_value', [], ['Twig\Tests\TemplateCamelCasePropertyObject' => ['camelCase']]],
+        ];
+    }
+
+    /**
+     * @dataProvider getSnakeCaseSandboxErrorTests
+     */
+    public function testSnakeCaseWithSandboxErrors(string $template, string $expectedExceptionClass)
+    {
+        $loader = new ArrayLoader(['index' => $template]);
+        $twig = new Environment($loader, ['autoescape' => false]);
+        $policy = new SecurityPolicy([], [], [], [], []);
+        $twig->addExtension(new SandboxExtension($policy, true));
+
+        $this->expectException($expectedExceptionClass);
+
+        $twig->load('index')->render([
+            'obj' => new TemplateCamelCaseMethodObject(),
+            'prop_obj' => new TemplateCamelCasePropertyObject(),
+        ]);
+    }
+
+    public static function getSnakeCaseSandboxErrorTests()
+    {
+        return [
+            // Method not allowed via snake_case
+            ['{{ obj.camel_case }}', SecurityError::class],
+            // Property not allowed via snake_case
+            ['{{ prop_obj.camel_case }}', SecurityError::class],
+        ];
+    }
+
+    /**
+     * @dataProvider getCamelCaseToSnakeCaseMethodTests
+     */
+    public function testCamelCaseToSnakeCaseMethodAccess($item, $expectedValue)
+    {
+        $twig = new Environment(new ArrayLoader());
+        $template = new TemplateForTest($twig, 'index.twig');
+        $object = new TemplateSnakeCaseMethodObject();
+
+        $this->assertEquals($expectedValue, CoreExtension::getAttribute($twig, $template->getSourceContext(), $object, $item, [], Template::ANY_CALL));
+    }
+
+    public static function getCamelCaseToSnakeCaseMethodTests()
+    {
+        return [
+            // Direct snake_case access
+            ['some_value', 'some_value_result'],
+            // camelCase -> get_snake_case()
+            ['someValue', 'some_value_result'],
+            // Direct snake_case access for is_ method
+            ['active', true],
+            // camelCase access is_active() - already works via isActive shortcut
+            ['active', true],
+        ];
+    }
+
+    /**
+     * @dataProvider getCamelCaseToSnakeCasePropertyTests
+     */
+    public function testCamelCaseToSnakeCasePropertyAccess($item, $expectedValue)
+    {
+        $twig = new Environment(new ArrayLoader());
+        $template = new TemplateForTest($twig, 'index.twig');
+        $object = new TemplateSnakeCasePropertyObject();
+
+        $this->assertEquals($expectedValue, CoreExtension::getAttribute($twig, $template->getSourceContext(), $object, $item, [], Template::ANY_CALL));
+    }
+
+    public static function getCamelCaseToSnakeCasePropertyTests()
+    {
+        return [
+            // Direct snake_case access
+            ['snake_case_prop', 'snake_value'],
+            // camelCase -> snake_case property
+            ['snakeCaseProp', 'snake_value'],
+            // Direct access
+            ['another_prop', 'another_value'],
+            // camelCase -> snake_case
+            ['anotherProp', 'another_value'],
+        ];
+    }
 }
 
 class TemplateForTest extends Template
@@ -780,5 +959,57 @@ class TemplateMagicMethodExceptionObject
     public function __call($method, $arguments)
     {
         throw new \BadMethodCallException(\sprintf('Unknown method "%s".', $method));
+    }
+}
+
+class TemplateCamelCaseMethodObject
+{
+    private $camelCase = 'camelcase_prop';
+
+    public function getCamelCase()
+    {
+        return 'camelcase';
+    }
+
+    public function getHTTPResponseCode()
+    {
+        return 'httpresponsecode';
+    }
+
+    public function get_http2_response()
+    {
+        return 'http2_response';
+    }
+
+    public $responseCode = 'responseCode';
+}
+
+class TemplateCamelCasePropertyObject
+{
+    public $camelCase = 'camelCase_value';
+    public $simpleProperty = 'simple_value';
+}
+
+class TemplateSnakeCasePropertyObject
+{
+    public $snake_case_prop = 'snake_value';
+    public $another_prop = 'another_value';
+}
+
+class TemplateSnakeCaseMethodObject
+{
+    public function get_some_value()
+    {
+        return 'some_value_result';
+    }
+
+    public function is_active()
+    {
+        return true;
+    }
+
+    public function has_children()
+    {
+        return false;
     }
 }
