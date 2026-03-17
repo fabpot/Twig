@@ -350,7 +350,7 @@ class Lexer
         }
 
         if ('#' === $current && preg_match(self::REGEX_INLINE_COMMENT, $this->code, $match, 0, $this->cursor)) {
-            $this->moveCursor($match[0]);
+            $this->moveCursorNoNewline($match[0]);
 
             return;
         }
@@ -364,7 +364,7 @@ class Lexer
         if ('"' === $current && preg_match(self::REGEX_DQ_STRING_DELIM, $this->code, $match, 0, $this->cursor)) {
             $this->brackets[] = ['"', $this->lineno];
             $this->pushState(self::STATE_STRING);
-            $this->moveCursor($match[0]);
+            ++$this->cursor;
 
             return;
         }
@@ -387,7 +387,7 @@ class Lexer
         // names
         elseif (preg_match(self::REGEX_NAME, $this->code, $match, 0, $this->cursor)) {
             $this->pushToken(Token::NAME_TYPE, $match[0]);
-            $this->moveCursor($match[0]);
+            $this->moveCursorNoNewline($match[0]);
         }
         // numbers
         elseif (preg_match(self::REGEX_NUMBER, $this->code, $match, 0, $this->cursor)) {
@@ -401,11 +401,11 @@ class Lexer
         elseif (preg_match(self::REGEX_DQ_STRING_DELIM, $this->code, $match, 0, $this->cursor)) {
             $this->brackets[] = ['"', $this->lineno];
             $this->pushState(self::STATE_STRING);
-            $this->moveCursor($match[0]);
+            ++$this->cursor;
         }
         // inline comment
         elseif (preg_match(self::REGEX_INLINE_COMMENT, $this->code, $match, 0, $this->cursor)) {
-            $this->moveCursor($match[0]);
+            $this->moveCursorNoNewline($match[0]);
         }
         // unlexable
         else {
@@ -416,7 +416,7 @@ class Lexer
     private function pushNumberToken(string $value): void
     {
         $this->pushToken(Token::NUMBER_TYPE, 0 + str_replace('_', '', $value));
-        $this->moveCursor($value);
+        $this->moveCursorNoNewline($value);
     }
 
     private function pushStringToken(string $value): void
@@ -566,6 +566,11 @@ class Lexer
     {
         $this->cursor += \strlen($text);
         $this->lineno += substr_count($text, "\n");
+    }
+
+    private function moveCursorNoNewline(string $text): void
+    {
+        $this->cursor += \strlen($text);
     }
 
     private function getOperatorRegex(): string
