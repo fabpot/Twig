@@ -335,6 +335,42 @@ class Lexer
             }
         }
 
+        $current = $this->code[$this->cursor];
+
+        if (str_contains(self::PUNCTUATION, $current)) {
+            $this->checkBrackets($current);
+            $this->pushToken(Token::PUNCTUATION_TYPE, $current);
+            ++$this->cursor;
+
+            return;
+        }
+
+        if ('#' === $current && preg_match(self::REGEX_INLINE_COMMENT, $this->code, $match, 0, $this->cursor)) {
+            $this->moveCursor($match[0]);
+
+            return;
+        }
+
+        if (("'" === $current || '"' === $current) && preg_match(self::REGEX_STRING, $this->code, $match, 0, $this->cursor)) {
+            $this->pushStringToken($match[0]);
+
+            return;
+        }
+
+        if ('"' === $current && preg_match(self::REGEX_DQ_STRING_DELIM, $this->code, $match, 0, $this->cursor)) {
+            $this->brackets[] = ['"', $this->lineno];
+            $this->pushState(self::STATE_STRING);
+            $this->moveCursor($match[0]);
+
+            return;
+        }
+
+        if (ctype_digit($current) && preg_match(self::REGEX_NUMBER, $this->code, $match, 0, $this->cursor)) {
+            $this->pushNumberToken($match[0]);
+
+            return;
+        }
+
         // operators
         if (preg_match($this->regexes['operator'], $this->code, $match, 0, $this->cursor)) {
             $operator = preg_replace('/\s+/', ' ', $match[0]);
@@ -351,19 +387,11 @@ class Lexer
         }
         // numbers
         elseif (preg_match(self::REGEX_NUMBER, $this->code, $match, 0, $this->cursor)) {
-            $this->pushToken(Token::NUMBER_TYPE, 0 + str_replace('_', '', $match[0]));
-            $this->moveCursor($match[0]);
-        }
-        // punctuation
-        elseif (str_contains(self::PUNCTUATION, $this->code[$this->cursor])) {
-            $this->checkBrackets($this->code[$this->cursor]);
-            $this->pushToken(Token::PUNCTUATION_TYPE, $this->code[$this->cursor]);
-            ++$this->cursor;
+            $this->pushNumberToken($match[0]);
         }
         // strings
         elseif (preg_match(self::REGEX_STRING, $this->code, $match, 0, $this->cursor)) {
-            $this->pushToken(Token::STRING_TYPE, $this->stripcslashes(substr($match[0], 1, -1), substr($match[0], 0, 1)));
-            $this->moveCursor($match[0]);
+            $this->pushStringToken($match[0]);
         }
         // opening double quoted string
         elseif (preg_match(self::REGEX_DQ_STRING_DELIM, $this->code, $match, 0, $this->cursor)) {
@@ -377,8 +405,20 @@ class Lexer
         }
         // unlexable
         else {
-            throw new SyntaxError(\sprintf('Unexpected character "%s".', $this->code[$this->cursor]), $this->lineno, $this->source);
+            throw new SyntaxError(\sprintf('Unexpected character "%s".', $current), $this->lineno, $this->source);
         }
+    }
+
+    private function pushNumberToken(string $value): void
+    {
+        $this->pushToken(Token::NUMBER_TYPE, 0 + str_replace('_', '', $value));
+        $this->moveCursor($value);
+    }
+
+    private function pushStringToken(string $value): void
+    {
+        $this->pushToken(Token::STRING_TYPE, $this->stripcslashes(substr($value, 1, -1), $value[0]));
+        $this->moveCursor($value);
     }
 
     private function stripcslashes(string $str, string $quoteType): string
