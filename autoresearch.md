@@ -38,6 +38,7 @@ of HTML-heavy, expression-heavy, and string/comment/verbatim-heavy templates.
 - Naively fast-pathing every punctuation character before the operator regex was faster on the benchmark, but it broke overlapping operators like `?.`, `??`, `?:`, `? :`, `..`, and `...`.
 - **Kept:** branching on the current expression character to fast-path inline comments, quoted strings, digit-starting numbers, and only unambiguous punctuation before attempting the expensive operator regex improved `lex_ms` from 363.906 to 353.493 while keeping the suite green.
 - **Kept:** switching known single-line lexer expression advances (names, numbers, inline comments, and quote delimiters) to cheaper no-newline cursor movement improved `lex_ms` further to 345.982.
+- **Kept:** skipping operator whitespace normalization for already single-token operators, and removing the now-redundant operator bracket check after the punctuation fast path, improved `lex_ms` to 342.425.
 - Current hypotheses worth testing next:
   - reducing repeated small string allocations in cursor advancement and token emission
-  - avoiding unnecessary operator post-processing when the matched operator contains no whitespace
+  - finding safe fast paths in `lexData()` that do not regress the mixed-template benchmark

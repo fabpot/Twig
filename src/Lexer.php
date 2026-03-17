@@ -37,6 +37,7 @@ class Lexer
     private $position;
     private $positions;
     private $currentVarBlockLine;
+    private array $operatorStartChars = [];
     private array $openingBrackets = ['{', '(', '['];
     private array $closingBrackets = ['}', ')', ']'];
 
@@ -376,7 +377,7 @@ class Lexer
         }
 
         // operators
-        if (preg_match($this->regexes['operator'], $this->code, $match, 0, $this->cursor)) {
+        if (isset($this->operatorStartChars[$current]) && preg_match($this->regexes['operator'], $this->code, $match, 0, $this->cursor)) {
             $operator = false === strpbrk($match[0], " \t\n\r\0\x0B") ? $match[0] : preg_replace('/\s+/', ' ', $match[0]);
             $this->pushToken(Token::OPERATOR_TYPE, $operator ?? $match[0]);
             $this->moveCursor($match[0]);
@@ -581,7 +582,10 @@ class Lexer
         arsort($expressionParsers);
 
         $regex = [];
+        $this->operatorStartChars = [];
         foreach ($expressionParsers as $expressionParser => $length) {
+            $this->operatorStartChars[$expressionParser[0]] = true;
+
             // an operator that ends with a character must be followed by
             // a whitespace, a parenthesis, an opening map [ or sequence {
             $r = preg_quote($expressionParser, '/');
