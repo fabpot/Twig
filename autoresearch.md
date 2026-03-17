@@ -35,6 +35,7 @@ of HTML-heavy, expression-heavy, and string/comment/verbatim-heavy templates.
 ## What's Been Tried
 - New target as of 2026-03-17: lexer tokenization. Previous render-path experiments are intentionally ignored for this session.
 - Replacing the full token-start regex pre-scan with repeated `strpos()` scans in `lexData()` regressed on the representative mixed-template benchmark; the current one-shot regex scan is faster here.
+- **Kept:** branching on the current expression character to fast-path punctuation, inline comments, quoted strings, and digit-starting numbers before attempting the expensive operator regex improved `lex_ms` from 363.906 to 335.277.
 - Current hypotheses worth testing next:
-  - repeated regex and string-allocation work while advancing the cursor inside expressions and text segments
   - cheaper cursor/line-number updates for common no-newline fast paths
+  - reducing repeated small string allocations in cursor advancement and token emission

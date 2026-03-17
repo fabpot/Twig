@@ -336,8 +336,12 @@ class Lexer
         }
 
         $current = $this->code[$this->cursor];
+        $next = $this->code[$this->cursor + 1] ?? '';
+        $nextNonSpace = '?' === $current ? ($this->code[$this->cursor + 1 + strspn($this->code, " \t\n\r\0\x0B", $this->cursor + 1)] ?? '') : '';
 
-        if (str_contains(self::PUNCTUATION, $current)) {
+        if (str_contains(self::PUNCTUATION, $current)
+            && ('?' !== $current || ('?' !== $next && '.' !== $next && ':' !== $nextNonSpace))
+            && ('.' !== $current || '.' !== $next)) {
             $this->checkBrackets($current);
             $this->pushToken(Token::PUNCTUATION_TYPE, $current);
             ++$this->cursor;
