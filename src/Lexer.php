@@ -343,9 +343,27 @@ class Lexer
         if (str_contains(self::PUNCTUATION, $current)
             && ('?' !== $current || ('?' !== $next && '.' !== $next && ':' !== $nextNonSpace))
             && ('.' !== $current || '.' !== $next)) {
-            if ('(' === $current || '[' === $current || '{' === $current || ')' === $current || ']' === $current || '}' === $current) {
-                $this->checkBrackets($current);
+            switch ($current) {
+                case '(':
+                case '[':
+                case '{':
+                    $this->brackets[] = [$current, $this->lineno];
+                    break;
+
+                case ')':
+                case ']':
+                case '}':
+                    if (!$this->brackets) {
+                        throw new SyntaxError(\sprintf('Unexpected "%s".', $current), $this->lineno, $this->source);
+                    }
+
+                    [$openingBracket, $lineno] = array_pop($this->brackets);
+                    if (($current === ')' && '(' !== $openingBracket) || ($current === ']' && '[' !== $openingBracket) || ($current === '}' && '{' !== $openingBracket)) {
+                        throw new SyntaxError(\sprintf('Unclosed "%s".', $openingBracket), $lineno, $this->source);
+                    }
+                    break;
             }
+
             $this->pushToken(Token::PUNCTUATION_TYPE, $current);
             ++$this->cursor;
 
