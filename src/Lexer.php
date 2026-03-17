@@ -624,19 +624,37 @@ class Lexer
 
     private function checkBrackets(string $code): void
     {
-        // opening bracket
-        if (\in_array($code, $this->openingBrackets, true)) {
-            $this->brackets[] = [$code, $this->lineno];
-        } elseif (\in_array($code, $this->closingBrackets, true)) {
-            // closing bracket
-            if (!$this->brackets) {
-                throw new SyntaxError(\sprintf('Unexpected "%s".', $code), $this->lineno, $this->source);
-            }
+        switch ($code) {
+            case '(':
+            case '[':
+            case '{':
+                $this->brackets[] = [$code, $this->lineno];
 
-            [$expect, $lineno] = array_pop($this->brackets);
-            if ($code !== str_replace($this->openingBrackets, $this->closingBrackets, $expect)) {
-                throw new SyntaxError(\sprintf('Unclosed "%s".', $expect), $lineno, $this->source);
-            }
+                return;
+
+            case ')':
+                $expect = '(';
+                break;
+
+            case ']':
+                $expect = '[';
+                break;
+
+            case '}':
+                $expect = '{';
+                break;
+
+            default:
+                return;
+        }
+
+        if (!$this->brackets) {
+            throw new SyntaxError(\sprintf('Unexpected "%s".', $code), $this->lineno, $this->source);
+        }
+
+        [$openingBracket, $lineno] = array_pop($this->brackets);
+        if ($openingBracket !== $expect) {
+            throw new SyntaxError(\sprintf('Unclosed "%s".', $openingBracket), $lineno, $this->source);
         }
     }
 }
