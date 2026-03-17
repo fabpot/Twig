@@ -377,11 +377,8 @@ class Lexer
 
         // operators
         if (preg_match($this->regexes['operator'], $this->code, $match, 0, $this->cursor)) {
-            $operator = preg_replace('/\s+/', ' ', $match[0]);
-            if (\in_array($operator, $this->openingBrackets, true)) {
-                $this->checkBrackets($operator);
-            }
-            $this->pushToken(Token::OPERATOR_TYPE, $operator);
+            $operator = false === strpbrk($match[0], " \t\n\r\0\x0B") ? $match[0] : preg_replace('/\s+/', ' ', $match[0]);
+            $this->pushToken(Token::OPERATOR_TYPE, $operator ?? $match[0]);
             $this->moveCursor($match[0]);
         }
         // names
