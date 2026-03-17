@@ -40,6 +40,7 @@ of HTML-heavy, expression-heavy, and string/comment/verbatim-heavy templates.
 - **Kept:** switching known single-line lexer expression advances (names, numbers, inline comments, and quote delimiters) to cheaper no-newline cursor movement improved `lex_ms` further to 345.982.
 - **Kept:** skipping operator whitespace normalization for already single-token operators, and removing the now-redundant operator bracket check after the punctuation fast path, improved `lex_ms` to 342.425.
 - **Kept:** precomputing the set of first bytes that can start an operator and skipping the operator regex entirely for other expression tokens improved `lex_ms` to 339.501.
+- **Kept:** replacing bracket tracking `in_array()` / `str_replace()` logic with direct opening/closing bracket dispatch in `checkBrackets()` improved `lex_ms` to 328.872.
 - Current hypotheses worth testing next:
   - reducing repeated small string allocations in cursor advancement and token emission
   - finding safe fast paths in `lexData()` that do not regress the mixed-template benchmark

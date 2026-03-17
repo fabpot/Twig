@@ -343,7 +343,9 @@ class Lexer
         if (str_contains(self::PUNCTUATION, $current)
             && ('?' !== $current || ('?' !== $next && '.' !== $next && ':' !== $nextNonSpace))
             && ('.' !== $current || '.' !== $next)) {
-            $this->checkBrackets($current);
+            if ('(' === $current || '[' === $current || '{' === $current || ')' === $current || ']' === $current || '}' === $current) {
+                $this->checkBrackets($current);
+            }
             $this->pushToken(Token::PUNCTUATION_TYPE, $current);
             ++$this->cursor;
 
