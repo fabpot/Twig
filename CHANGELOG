@@ -1,6 +1,6 @@
 # 3.27.2 (2026-XX-XX)
 
- * n/a
+ * Check single-pass iterators lazily in the sandbox instead of materializing them upfront to reduce memory usage
 
 # 3.27.1 (2026-05-30)
 

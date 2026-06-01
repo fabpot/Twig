@@ -1259,7 +1259,7 @@ EOF
     public function testSandboxAllowsPrintingStringableTraversableWhenToStringAllowed()
     {
         // Printing the container itself yields its `__toString()` value. The
-        // sandbox materialises the iterable to also policy-check the elements
+        // sandbox materializes the iterable to also policy-check the elements
         // (some consumers like `join`/`replace` would coerce them too), so the
         // inner items must not contain anything that violates the policy.
         $twig = $this->getEnvironment(
@@ -1282,7 +1282,7 @@ EOF
     public function testSandboxHandlesCyclicTraversableWithoutStackOverflow(string $template)
     {
         // A self-referencing IteratorAggregate must not cause the sandbox policy
-        // walker to recurse infinitely when materialising the iterable. PHP itself
+        // walker to recurse infinitely when materializing the iterable. PHP itself
         // throws a clean error when the cyclic object reaches `implode()` /
         // string coercion; the sandbox must NOT turn that into a stack overflow.
         $twig = $this->getEnvironment(
@@ -1407,6 +1407,113 @@ EOF
             $this->assertSame('Twig\Tests\Extension\FooObject', $e->getClassName());
             $this->assertSame('__tostring', $e->getMethodName());
         }
+    }
+
+    public function testSandboxChecksSinglePassIteratorLazily()
+    {
+        // A single-pass Iterator/Generator must not be fully materialized by the
+        // sandbox boundary: a consumer that only pulls the first element (here
+        // `first`) must not drain the whole sequence nor trigger a policy
+        // violation for a disallowed object sitting further down the stream.
+        $twig = $this->getEnvironment(
+            true,
+            [],
+            ['index' => '{{ gen|first }}'],
+            [],
+            ['first', 'join'],
+            ['Twig\Tests\Extension\FooObject' => 'getAnotherFooObject'],
+        );
+
+        $consumed = 0;
+        $gen = (static function () use (&$consumed) {
+            foreach (['a', 'b', 'c'] as $v) {
+                ++$consumed;
+                yield $v;
+            }
+            yield new FooObject();
+        })();
+
+        $this->assertSame('a', $twig->load('index')->render(['gen' => $gen]));
+        $this->assertLessThan(4, $consumed, 'The single-pass iterator must not be fully materialized.');
+    }
+
+    /**
+     * @dataProvider getSinglePassIteratorBypassTemplates
+     */
+    public function testSandboxBlocksDisallowedToStringInSinglePassIterator(string $template, \Closure $gen)
+    {
+        // Laziness must not weaken the policy: as soon as a consumer pulls the
+        // disallowed object, the __toString check must fire, whatever the
+        // consumption path (filter, mapping keys, the `in` operator, ...).
+        $twig = $this->getEnvironment(
+            true,
+            [],
+            ['index' => $template],
+            ['if'],
+            ['join', 'replace'],
+            ['Twig\Tests\Extension\FooObject' => 'getAnotherFooObject'],
+        );
+
+        try {
+            $twig->load('index')->render(['gen' => $gen()]);
+            $this->fail('Sandbox should block __toString on objects yielded by a single-pass iterator once it is consumed.');
+        } catch (SecurityNotAllowedMethodError $e) {
+            $this->assertSame('Twig\Tests\Extension\FooObject', $e->getClassName());
+            $this->assertSame('__tostring', $e->getMethodName());
+        }
+    }
+
+    public static function getSinglePassIteratorBypassTemplates(): iterable
+    {
+        yield 'join' => ['{{ gen|join(", ") }}', static function () {
+            yield 'a';
+            yield new FooObject();
+        }];
+        yield 'replace_value' => ['{{ "__toString"|replace(gen) }}', static function () {
+            yield '__toString' => new FooObject();
+        }];
+        yield 'in_operator' => ['{% if "needle" in gen %}LEAK{% endif %}', static function () {
+            yield 'a';
+            yield new FooObject();
+        }];
+        yield 'nested_array' => ['{{ gen|join(", ") }}', static function () {
+            yield ['a', new FooObject()];
+        }];
+    }
+
+    /**
+     * @dataProvider getSafeSinglePassIteratorTemplates
+     */
+    public function testSandboxAllowsSafeSinglePassIterator(string $template, \Closure $gen, string $expected)
+    {
+        // A single-pass iterator with only allowed values must render correctly,
+        // including its keys (the lazy decorator yields `$k => $v`).
+        $twig = $this->getEnvironment(
+            true,
+            [],
+            ['index' => $template],
+            [],
+            ['join', 'replace', 'first'],
+        );
+
+        $this->assertSame($expected, $twig->load('index')->render(['gen' => $gen()]));
+    }
+
+    public static function getSafeSinglePassIteratorTemplates(): iterable
+    {
+        yield 'join' => ['{{ gen|join("-") }}', static function () {
+            yield 'a';
+            yield 'b';
+            yield 'c';
+        }, 'a-b-c'];
+        yield 'replace_preserves_keys' => ['{{ "ab"|replace(gen) }}', static function () {
+            yield 'a' => 'X';
+            yield 'b' => 'Y';
+        }, 'XY'];
+        yield 'first' => ['{{ gen|first }}', static function () {
+            yield 'a';
+            yield 'b';
+        }, 'a'];
     }
 
     public function testColumnFilterUnaffectedOutsideSandbox()
@@ -1919,7 +2026,7 @@ class ColumnObject
 // Implements both Stringable and Traversable: a sandbox policy may legitimately
 // allow the container's own `__toString`, but the elements yielded by
 // `getIterator()` must still be policy-checked when consumers (`join`, `replace`,
-// ...) materialise the iterable and coerce its contents to string.
+// ...) materialize the iterable and coerce its contents to string.
 class StringableTraversableObject implements \IteratorAggregate, \Stringable
 {
     public function __construct(private array $items)
@@ -1938,7 +2045,7 @@ class StringableTraversableObject implements \IteratorAggregate, \Stringable
 }
 
 // Self-referencing IteratorAggregate: getIterator() yields `$this`. Used to
-// verify that the sandbox policy walker (which materialises Traversables to
+// verify that the sandbox policy walker (which materializes Traversables to
 // enforce the `__toString` policy on yielded elements) does not recurse
 // infinitely.
 class CyclicTraversableObject implements \IteratorAggregate

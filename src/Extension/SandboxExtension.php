@@ -126,6 +126,26 @@ final class SandboxExtension extends AbstractExtension
      */
     public function ensureToStringAllowed($obj, int $lineno = -1, ?Source $source = null)
     {
+        // Single-pass iterators are checked lazily as the consumer pulls them,
+        // to avoid materializing the whole sequence. IteratorAggregate and
+        // Stringable iterables are handled eagerly so we can return the
+        // original object (e.g. a Symfony FormView) untouched.
+        if (
+            $obj instanceof \Traversable
+            && !$obj instanceof \IteratorAggregate
+            && !$obj instanceof \Stringable
+            && $this->isSandboxed($source)
+        ) {
+            $seen = new \SplObjectStorage();
+            $seen[$obj] = true;
+
+            return (function () use ($obj, $lineno, $source, $seen) {
+                foreach ($obj as $k => $v) {
+                    yield $k => $this->doEnsureToStringAllowed($v, $lineno, $source, $seen);
+                }
+            })();
+        }
+
         return $this->doEnsureToStringAllowed($obj, $lineno, $source, new \SplObjectStorage());
     }
 
@@ -191,7 +211,7 @@ final class SandboxExtension extends AbstractExtension
                 return $obj;
             }
 
-            // Single-pass Iterator/Generator: materialise to validate.
+            // Single-pass Iterator/Generator: materialize to validate.
             $array = iterator_to_array($obj);
             $this->ensureToStringAllowedForArray($array, $lineno, $source, $seen);
 
