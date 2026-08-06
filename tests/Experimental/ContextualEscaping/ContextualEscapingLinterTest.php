@@ -317,8 +317,10 @@ class ContextualEscapingLinterTest extends TestCase
     public function testRejectsUnsupportedTemplateComposition(string $template): void
     {
         $result = $this->lint($template);
+        $codes = $this->getDiagnosticCodes($result);
 
-        $this->assertContains(DiagnosticCode::UnsupportedTemplateComposition, $this->getDiagnosticCodes($result));
+        $this->assertContains(DiagnosticCode::UnsupportedTemplateComposition, $codes);
+        $this->assertNotContains(DiagnosticCode::UnsupportedNode, $codes);
     }
 
     public static function provideUnsupportedComposition(): iterable
@@ -333,8 +335,11 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'import' => ['{% import "macros.html.twig" as macros %}'];
         yield 'from import' => ['{% from "macros.html.twig" import input %}'];
         yield 'block' => ['{% block content %}content{% endblock %}'];
+        yield 'block function' => ['{{ block("content") }}{% block content %}content{% endblock %}'];
         yield 'macro' => ['{% macro field() %}field{% endmacro %}'];
+        yield 'macro call' => ['{% macro field() %}field{% endmacro %}{{ _self.field() }}'];
         yield 'inheritance' => ['{% extends "base.html.twig" %}'];
+        yield 'parent function' => ['{% extends "base.html.twig" %}{% block content %}{{ parent() }}{% endblock %}'];
         yield 'capture' => ['{% set content %}content{% endset %}'];
         yield 'embed' => ['{% embed "base.html.twig" %}{% endembed %}'];
     }

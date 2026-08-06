@@ -121,7 +121,7 @@ final class ContextualEscapingAnalyzer
             WithNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
             AutoEscapeNode::class => $this->analyzeAutoEscape($node, $context),
             SetNode::class => $this->analyzeSet($node, $context),
-            BlockReferenceNode::class, ImportNode::class, IncludeNode::class, EmbedNode::class, BlockNode::class, MacroDeclarationNode::class, CaptureNode::class => $this->rejectCompositionNode($node, $context),
+            BlockReferenceNode::class, BlockReferenceExpression::class, ImportNode::class, IncludeNode::class, EmbedNode::class, BlockNode::class, MacroDeclarationNode::class, MacroReferenceExpression::class, ParentExpression::class, CaptureNode::class => $this->rejectCompositionNode($node, $context),
             CheckSecurityCallNode::class, CheckSecurityNode::class, ConfigNode::class, DeprecatedNode::class, DoNode::class, FlushNode::class, TypesNode::class => $context,
             default => $this->rejectUnknownNode($node, $context),
         };
@@ -594,6 +594,9 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case BlockReferenceNode::class:
+            case BlockReferenceExpression::class:
+            case MacroReferenceExpression::class:
+            case ParentExpression::class:
             case ImportNode::class:
             case IncludeNode::class:
             case EmbedNode::class:
