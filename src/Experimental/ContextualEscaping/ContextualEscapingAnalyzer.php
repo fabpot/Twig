@@ -409,11 +409,11 @@ final class ContextualEscapingAnalyzer
     private function findExplicitEscapingStrategies(Node $node): array
     {
         if ($node instanceof FilterExpression) {
-            if ($this->isAutomaticEscape($node)) {
-                return $this->findExplicitEscapingStrategies($node->getNode('node'));
-            }
             if (!\in_array($node->getAttribute('twig_callable')->getName(), ['e', 'escape'], true)) {
                 return [];
+            }
+            if ($this->isAutomaticEscape($node)) {
+                return $this->findExplicitEscapingStrategies($node->getNode('node'));
             }
 
             $arguments = $node->getNode('arguments');
@@ -443,7 +443,7 @@ final class ContextualEscapingAnalyzer
     {
         $arguments = $node->getNode('arguments');
 
-        return 2 < \count($arguments) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value');
+        return $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value');
     }
 
     private function describePlan(EscapePlan $plan): string

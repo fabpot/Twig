@@ -25,6 +25,7 @@ use Twig\Node\Node;
 use Twig\Source;
 use Twig\Token;
 use Twig\TokenParser\AbstractTokenParser;
+use Twig\TwigFilter;
 
 class ContextualEscapingLinterTest extends TestCase
 {
@@ -282,6 +283,16 @@ class ContextualEscapingLinterTest extends TestCase
     public function testAcceptsMatchingExplicitEscaping(string $template): void
     {
         $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+    }
+
+    public function testIgnoresArgumentsOfNonEscapingFilters(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFilter(new TwigFilter('format_value', static fn ($value, $first = null, $second = null, $third = null) => $value));
+
+        $result = $this->createLinter($environment)->lint(new Source('{{ value|format_value(first: 1, third: 3) }}', 'index.html.twig'));
 
         $this->assertSame([], $result->getDiagnostics());
     }
