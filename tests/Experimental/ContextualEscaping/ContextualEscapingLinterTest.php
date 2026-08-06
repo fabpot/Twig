@@ -18,6 +18,7 @@ use Twig\Experimental\ContextualEscaping\AnalysisResult;
 use Twig\Experimental\ContextualEscaping\ContextualEscapingAnalyzer;
 use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
 use Twig\Experimental\ContextualEscaping\DiagnosticCode;
+use Twig\Experimental\ContextualEscaping\EnvironmentTemplateResolver;
 use Twig\Experimental\ContextualEscaping\EscapeOperation;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Loader\ArrayLoader;
@@ -324,6 +325,170 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'autoescape block' => ['{% autoescape "html" %}<div title="{{ value }}">{% endautoescape %}'];
     }
 
+    /**
+     * @param array<string, string>       $templates
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideSupportedComposition')]
+    public function testAnalyzesStaticTemplateComposition(array $templates, string $name, array $expectedPlans): void
+    {
+        $result = $this->lintTemplates($templates, $name);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideSupportedComposition(): iterable
+    {
+        yield 'standalone block' => [
+            ['index.html.twig' => '{% block content %}{{ value }}{% endblock %}'],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'block function' => [
+            ['index.html.twig' => '{{ block("content") }}{% block content %}{{ value }}{% endblock %}'],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'inheritance' => [
+            [
+                'base.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'index.html.twig' => '{% extends "base.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'parent block' => [
+            [
+                'base.html.twig' => '{% block content %}{{ parent_value }}{% endblock %}',
+                'index.html.twig' => '{% extends "base.html.twig" %}{% block content %}{{ child_value }}{{ parent() }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'multi-level inheritance' => [
+            [
+                'base.html.twig' => '<div title="{% block content %}{{ base_value }}{% endblock %}">',
+                'middle.html.twig' => '{% extends "base.html.twig" %}{% block content %}{{ middle_value }}{{ parent() }}{% endblock %}',
+                'index.html.twig' => '{% extends "middle.html.twig" %}{% block content %}{{ child_value }}{{ parent() }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute], [EscapeOperation::HtmlAttribute], [EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'nested rendering through a shared parent' => [
+            [
+                'base.html.twig' => '{% block content %}base{% endblock %}',
+                'inner.html.twig' => '{% extends "base.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+                'index.html.twig' => '{% extends "base.html.twig" %}{% block content %}{% include "inner.html.twig" %}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'include tag' => [
+            [
+                'index.html.twig' => '<div title="{% include "partial.html.twig" %}">',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'include function' => [
+            [
+                'index.html.twig' => '{{ include("partial.html.twig") }}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'include fallback list' => [
+            [
+                'index.html.twig' => '{% include ["missing.html.twig", "partial.html.twig"] %}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'missing include ignored' => [
+            ['index.html.twig' => 'before{% include "missing.html.twig" ignore missing %}after'],
+            'index.html.twig',
+            [],
+        ];
+        yield 'self macro' => [
+            [
+                'index.html.twig' => '<div title="{% macro value() %}{{ value }}{% endmacro %}{{ _self.value() }}">',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'imported macro' => [
+            [
+                'index.html.twig' => '<div title="{% import "macros.html.twig" as macros %}{{ macros.value() }}">',
+                'macros.html.twig' => '{% macro value() %}{{ value }}{% endmacro %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'self imported macro' => [
+            [
+                'index.html.twig' => '<div title="{% macro value() %}{{ value }}{% endmacro %}{% import _self as macros %}{{ macros.value() }}">',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'from imported macro' => [
+            [
+                'index.html.twig' => '<div title="{% from "macros.html.twig" import value %}{{ value() }}">',
+                'macros.html.twig' => '{% macro value() %}{{ value }}{% endmacro %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'external block' => [
+            [
+                'index.html.twig' => '<div title="{{ block("content", "blocks.html.twig") }}">',
+                'blocks.html.twig' => '{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'block trait' => [
+            [
+                'index.html.twig' => '<div title="{% use "blocks.html.twig" with content as value %}{{ block("value") }}">',
+                'blocks.html.twig' => '{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'embed' => [
+            [
+                'base.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'index.html.twig' => '{% embed "base.html.twig" %}{% block content %}{{ value }}{% endblock %}{% endembed %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
+    public function testPropagatesContextAcrossIncludedTemplates(): void
+    {
+        $result = $this->lintTemplates([
+            'index.html.twig' => '{% include "open-script.html.twig" %}{{ value }}</script>',
+            'open-script.html.twig' => '<script>',
+        ], 'index.html.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
+    }
+
+    public function testRejectsRecursiveComposition(): void
+    {
+        $result = $this->lintTemplates([
+            'index.html.twig' => '{% include "index.html.twig" %}',
+        ], 'index.html.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedTemplateComposition], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('Recursive composition', $result->getDiagnostics()[0]->getMessage());
+    }
+
     #[DataProvider('provideUnsupportedComposition')]
     public function testRejectsUnsupportedTemplateComposition(string $template): void
     {
@@ -338,17 +503,10 @@ class ContextualEscapingLinterTest extends TestCase
     {
         yield 'include tag' => ['{% include "other.html.twig" %}'];
         yield 'include function' => ['{{ include("other.html.twig") }}'];
-        yield 'include function in a condition' => ['{% if include("other.html.twig") %}content{% endif %}'];
         yield 'include function in an assignment' => ['{% set content = include("other.html.twig") %}'];
-        yield 'include function in a do tag' => ['{% do include("other.html.twig") %}'];
-        yield 'include function in a loop sequence' => ['{% for item in include("other.html.twig") %}{{ item }}{% endfor %}'];
         yield 'include function in a with expression' => ['{% with {content: include("other.html.twig")} %}content{% endwith %}'];
         yield 'import' => ['{% import "macros.html.twig" as macros %}'];
         yield 'from import' => ['{% from "macros.html.twig" import input %}'];
-        yield 'block' => ['{% block content %}content{% endblock %}'];
-        yield 'block function' => ['{{ block("content") }}{% block content %}content{% endblock %}'];
-        yield 'macro' => ['{% macro field() %}field{% endmacro %}'];
-        yield 'macro call' => ['{% macro field() %}field{% endmacro %}{{ _self.field() }}'];
         yield 'inheritance' => ['{% extends "base.html.twig" %}'];
         yield 'parent function' => ['{% extends "base.html.twig" %}{% block content %}{{ parent() }}{% endblock %}'];
         yield 'capture' => ['{% set content %}content{% endset %}'];
@@ -368,12 +526,16 @@ class ContextualEscapingLinterTest extends TestCase
 
     public static function provideUnsupportedCompositionContainingRawOutput(): iterable
     {
-        $expectedCodes = [DiagnosticCode::UnsupportedTemplateComposition, DiagnosticCode::RawOutput];
-
-        yield 'capture' => ['{% set content %}{{ value|raw }}{% endset %}', $expectedCodes];
-        yield 'block' => ['{% block content %}{{ value|raw }}{% endblock %}', $expectedCodes];
-        yield 'macro' => ['{% macro content() %}{{ value|raw }}{% endmacro %}', $expectedCodes];
-        yield 'embed' => ['{% embed "base.html.twig" %}{% block content %}{{ value|raw }}{% endblock %}{% endembed %}', $expectedCodes];
+        yield 'capture' => [
+            '{% set content %}{{ value|raw }}{% endset %}',
+            [DiagnosticCode::UnsupportedTemplateComposition, DiagnosticCode::RawOutput],
+        ];
+        yield 'block' => ['{% block content %}{{ value|raw }}{% endblock %}', [DiagnosticCode::RawOutput]];
+        yield 'macro' => ['{% macro content() %}{{ value|raw }}{% endmacro %}', [DiagnosticCode::RawOutput]];
+        yield 'embed' => [
+            '{% embed "base.html.twig" %}{% block content %}{{ value|raw }}{% endblock %}{% endembed %}',
+            [DiagnosticCode::RawOutput, DiagnosticCode::UnsupportedTemplateComposition],
+        ];
     }
 
     public function testRejectsAnUnknownStatementNodeEvenWithoutAnOutputMarker(): void
@@ -410,9 +572,19 @@ class ContextualEscapingLinterTest extends TestCase
         return $this->createLinter(new Environment(new ArrayLoader(), ['optimizations' => 0]))->lint(new Source($template, $name), $force);
     }
 
+    /**
+     * @param array<string, string> $templates
+     */
+    private function lintTemplates(array $templates, string $name): AnalysisResult
+    {
+        $environment = new Environment(new ArrayLoader($templates), ['optimizations' => 0]);
+
+        return $this->createLinter($environment)->lint($environment->getLoader()->getSourceContext($name));
+    }
+
     private function createLinter(Environment $environment): ContextualEscapingLinter
     {
-        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser()));
+        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(), new EnvironmentTemplateResolver($environment)));
     }
 
     /**

@@ -24,6 +24,7 @@ use Twig\Node\DoNode;
 use Twig\Node\EmbedNode;
 use Twig\Node\EmptyNode;
 use Twig\Node\Expression\AbstractExpression;
+use Twig\Node\Expression\ArrayExpression;
 use Twig\Node\Expression\BlockReferenceExpression;
 use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
@@ -31,6 +32,9 @@ use Twig\Node\Expression\FunctionExpression;
 use Twig\Node\Expression\MacroReferenceExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
 use Twig\Node\Expression\ParentExpression;
+use Twig\Node\Expression\SupportDefinedTestInterface;
+use Twig\Node\Expression\Variable\ContextVariable;
+use Twig\Node\Expression\Variable\MacroVariable;
 use Twig\Node\FlushNode;
 use Twig\Node\ForElseNode;
 use Twig\Node\ForNode;
@@ -38,6 +42,7 @@ use Twig\Node\IfNode;
 use Twig\Node\ImportNode;
 use Twig\Node\IncludeNode;
 use Twig\Node\MacroDeclarationNode;
+use Twig\Node\MacroNode;
 use Twig\Node\ModuleNode;
 use Twig\Node\Node;
 use Twig\Node\Nodes;
@@ -59,8 +64,36 @@ final class ContextualEscapingAnalyzer
     /** @var array<string, true> */
     private array $diagnosticKeys = [];
 
+    /**
+     * @var list<array{
+     *     modules: list<ModuleNode>,
+     *     blocks: array<string, list<array{module: ModuleNode, node: BlockNode}>>,
+     *     imports: array<string, ModuleNode>
+     * }>
+     */
+    private array $compositionScopes = [];
+
+    /** @var list<ModuleNode> */
+    private array $moduleStack = [];
+
+    /** @var list<array{name: string, definitions: list<array{module: ModuleNode, node: BlockNode}>, index: int}> */
+    private array $blockStack = [];
+
+    /** @var array<int, ModuleNode> */
+    private array $embeddedModules = [];
+
+    /** @var array<int, true> */
+    private array $activeModules = [];
+
+    /** @var array<string, true> */
+    private array $activeBlocks = [];
+
+    /** @var array<string, true> */
+    private array $activeMacros = [];
+
     public function __construct(
         private HtmlContextParser $contextParser,
+        private ?TemplateResolverInterface $templateResolver = null,
     ) {
     }
 
@@ -68,28 +101,15 @@ final class ContextualEscapingAnalyzer
     {
         $this->result = new AnalysisResult();
         $this->diagnosticKeys = [];
-        $hasUnsupportedComposition = false;
+        $this->compositionScopes = [];
+        $this->moduleStack = [];
+        $this->blockStack = [];
+        $this->embeddedModules = [];
+        $this->activeModules = [];
+        $this->activeBlocks = [];
+        $this->activeMacros = [];
 
-        if ($module->hasNode('parent')) {
-            $this->addDiagnostic($module, DiagnosticCode::UnsupportedTemplateComposition, 'Template inheritance is not supported by experimental contextual escaping analysis.');
-            $hasUnsupportedComposition = true;
-        }
-        if (\count($module->getNode('traits'))) {
-            $this->addDiagnostic($module, DiagnosticCode::UnsupportedTemplateComposition, 'Template traits are not supported by experimental contextual escaping analysis.');
-            $hasUnsupportedComposition = true;
-        }
-        $this->collectIndependentDiagnostics($module->getNode('display_start'));
-        $this->collectModuleIndependentDiagnostics($module);
-        $this->collectIndependentDiagnostics($module->getNode('display_end'));
-
-        $context = new HtmlContext();
-        $context = $this->analyzeNode($module->getNode('display_start'), $context);
-        $context = $this->analyzeNode($module->getNode('body'), $context);
-        $context = $this->analyzeNode($module->getNode('display_end'), $context);
-
-        if ($hasUnsupportedComposition) {
-            $context = $context->toDead();
-        }
+        $context = $this->analyzeModule($module, new HtmlContext(), $module);
 
         if (HtmlState::Text !== $context->getState() && HtmlState::Dead !== $context->getState()) {
             $line = $module->getSourceContext() ? 1 + substr_count($module->getSourceContext()->getCode(), "\n") : $module->getTemplateLine();
@@ -102,6 +122,230 @@ final class ContextualEscapingAnalyzer
         }
 
         return $this->result;
+    }
+
+    private function analyzeModule(ModuleNode $module, HtmlContext $context, Node $origin): HtmlContext
+    {
+        $scope = $this->createCompositionScope($module);
+        if (null === $scope) {
+            return $context->toDead();
+        }
+
+        $moduleId = spl_object_id($module);
+        if (isset($this->activeModules[$moduleId])) {
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('Recursive composition of the "%s" template is not supported.', $module->getTemplateName()));
+
+            return $context->toDead();
+        }
+
+        $this->activeModules[$moduleId] = true;
+        $this->compositionScopes[] = $scope;
+
+        $last = \count($scope['modules']) - 1;
+        foreach ($scope['modules'] as $index => $scopeModule) {
+            $context = $this->analyzeNodeInModule($scopeModule->getNode('display_start'), $scopeModule, $context);
+            $context = $this->analyzeNodeInModule($scopeModule->getNode('body'), $scopeModule, $context);
+            if ($last === $index) {
+                $context = $this->analyzeNodeInModule($scopeModule->getNode('display_end'), $scopeModule, $context);
+            }
+        }
+        for ($index = $last - 1; 0 <= $index; --$index) {
+            $scopeModule = $scope['modules'][$index];
+            $context = $this->analyzeNodeInModule($scopeModule->getNode('display_end'), $scopeModule, $context);
+        }
+
+        array_pop($this->compositionScopes);
+        unset($this->activeModules[$moduleId]);
+
+        return $context;
+    }
+
+    private function analyzeNodeInModule(Node $node, ModuleNode $module, HtmlContext $context): HtmlContext
+    {
+        $this->moduleStack[] = $module;
+        $context = $this->analyzeNode($node, $context);
+        array_pop($this->moduleStack);
+
+        return $context;
+    }
+
+    /**
+     * @return array{
+     *     modules: list<ModuleNode>,
+     *     blocks: array<string, list<array{module: ModuleNode, node: BlockNode}>>,
+     *     imports: array<string, ModuleNode>
+     * }|null
+     */
+    private function createCompositionScope(ModuleNode $module): ?array
+    {
+        $modules = [];
+        $seen = [];
+        $current = $module;
+
+        while (true) {
+            $id = spl_object_id($current);
+            if (isset($seen[$id])) {
+                $this->addDiagnostic($module, DiagnosticCode::UnsupportedTemplateComposition, 'Recursive template inheritance is not supported.');
+
+                return null;
+            }
+            $seen[$id] = true;
+            $modules[] = $current;
+            $this->registerEmbeddedModules($current);
+            $this->collectIndependentDiagnostics($current->getNode('display_start'));
+            $this->collectModuleIndependentDiagnostics($current);
+            $this->collectIndependentDiagnostics($current->getNode('display_end'));
+
+            if (!$current->hasNode('parent')) {
+                break;
+            }
+
+            $parent = $this->resolveTemplateExpression($current->getNode('parent'), $current);
+            if (null === $parent) {
+                return null;
+            }
+            $current = $parent;
+        }
+
+        $blocks = [];
+        $traitModules = [];
+        foreach ($modules as $scopeModule) {
+            $moduleBlocks = [];
+            foreach ($scopeModule->getNode('traits') as $trait) {
+                $traitModule = $this->resolveTemplateExpression($trait->getNode('template'), $scopeModule);
+                if (null === $traitModule) {
+                    return null;
+                }
+                $traitModules[] = $traitModule;
+                $this->collectModuleIndependentDiagnostics($traitModule);
+                foreach ($traitModule->getNode('blocks') as $name => $definition) {
+                    $block = $this->findBlockNode($definition);
+                    if (null === $block) {
+                        continue;
+                    }
+                    $target = $trait->getNode('targets')->hasNode((string) $name) ? $trait->getNode('targets')->getNode((string) $name)->getAttribute('value') : $name;
+                    $moduleBlocks[(string) $target] = ['module' => $traitModule, 'node' => $block];
+                }
+            }
+            foreach ($scopeModule->getNode('blocks') as $name => $definition) {
+                $block = $this->findBlockNode($definition);
+                if (null !== $block) {
+                    $moduleBlocks[(string) $name] = ['module' => $scopeModule, 'node' => $block];
+                }
+            }
+            foreach ($moduleBlocks as $name => $definition) {
+                $blocks[$name][] = $definition;
+            }
+        }
+
+        $imports = [];
+        $visitedImports = [];
+        foreach ([...$modules, ...$traitModules] as $scopeModule) {
+            $this->collectImports($scopeModule, $scopeModule->getNode('body'), $imports, $visitedImports);
+            foreach (['blocks', 'macros'] as $name) {
+                $this->collectImports($scopeModule, $scopeModule->getNode($name), $imports, $visitedImports);
+            }
+        }
+
+        return ['modules' => $modules, 'blocks' => $blocks, 'imports' => $imports];
+    }
+
+    private function resolveTemplateExpression(Node $expression, Node $origin, bool $ignoreMissing = false): ?ModuleNode
+    {
+        if ($expression instanceof ConstantExpression && \is_string($expression->getAttribute('value'))) {
+            $name = $expression->getAttribute('value');
+            $module = $this->templateResolver?->resolve($name, $origin->getTemplateName());
+            if (null !== $module || $ignoreMissing) {
+                return $module;
+            }
+
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The statically referenced "%s" template cannot be resolved.', $name));
+
+            return null;
+        }
+
+        if ($expression instanceof ArrayExpression) {
+            for ($i = 1; $i < \count($expression); $i += 2) {
+                if (!$expression->hasNode($i)) {
+                    continue;
+                }
+                $candidate = $expression->getNode($i);
+                if (!$candidate instanceof ConstantExpression || !\is_string($candidate->getAttribute('value'))) {
+                    break;
+                }
+                if (null !== $module = $this->templateResolver?->resolve($candidate->getAttribute('value'), $origin->getTemplateName())) {
+                    return $module;
+                }
+            }
+            if ($ignoreMissing) {
+                return null;
+            }
+        }
+
+        $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic template references are not supported by experimental contextual escaping analysis.');
+
+        return null;
+    }
+
+    private function registerEmbeddedModules(ModuleNode $module): void
+    {
+        foreach ($module->getAttribute('embedded_templates') as $embeddedModule) {
+            if (!$embeddedModule instanceof ModuleNode) {
+                continue;
+            }
+            $this->embeddedModules[$embeddedModule->getAttribute('index')] = $embeddedModule;
+            $this->registerEmbeddedModules($embeddedModule);
+        }
+    }
+
+    private function findBlockNode(Node $node): ?BlockNode
+    {
+        if ($node instanceof BlockNode) {
+            return $node;
+        }
+
+        foreach ($node as $child) {
+            if (null !== $block = $this->findBlockNode($child)) {
+                return $block;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, ModuleNode> $imports
+     * @param array<int, true>          $visited
+     */
+    private function collectImports(ModuleNode $module, Node $node, array &$imports, array &$visited): void
+    {
+        if ($node instanceof ImportNode) {
+            $variable = $node->getNode('var')->getNode('var');
+            $expression = $node->getNode('expr');
+            $importedModule = $expression instanceof ContextVariable && '_self' === $expression->getAttribute('name') ? $module : $this->resolveTemplateExpression($expression, $node);
+            if ($variable instanceof MacroVariable && null !== $importedModule) {
+                $imports[$this->getMacroVariableKey($variable, $module)] = $importedModule;
+                $id = spl_object_id($importedModule);
+                if (!isset($visited[$id])) {
+                    $visited[$id] = true;
+                    $this->collectImports($importedModule, $importedModule->getNode('body'), $imports, $visited);
+                    $this->collectImports($importedModule, $importedModule->getNode('macros'), $imports, $visited);
+                }
+            }
+
+            return;
+        }
+
+        foreach ($node as $child) {
+            $this->collectImports($module, $child, $imports, $visited);
+        }
+    }
+
+    private function getMacroVariableKey(MacroVariable $variable, ModuleNode $module): string
+    {
+        $name = $variable->getAttribute('name');
+
+        return \sprintf('%d:%s', spl_object_id($module), null === $name ? '@'.$variable->getTemplateLine() : $name);
     }
 
     private function analyzeNode(Node $node, HtmlContext $context, string|bool|null $explicitAutoescape = null): HtmlContext
@@ -121,7 +365,15 @@ final class ContextualEscapingAnalyzer
             WithNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
             AutoEscapeNode::class => $this->analyzeAutoEscape($node, $context),
             SetNode::class => $this->analyzeSet($node, $context),
-            BlockReferenceNode::class, BlockReferenceExpression::class, ImportNode::class, IncludeNode::class, EmbedNode::class, BlockNode::class, MacroDeclarationNode::class, MacroReferenceExpression::class, ParentExpression::class, CaptureNode::class => $this->rejectCompositionNode($node, $context),
+            BlockReferenceNode::class => $this->analyzeBlock($node->getAttribute('name'), $context, $node),
+            BlockReferenceExpression::class => $this->analyzeBlockExpression($node, $context),
+            ParentExpression::class => $this->analyzeParentBlock($node, $context),
+            IncludeNode::class => $this->analyzeInclude($node, $context),
+            EmbedNode::class => $this->analyzeEmbed($node, $context),
+            MacroReferenceExpression::class => $this->analyzeMacro($node, $context),
+            BlockNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
+            ImportNode::class, MacroDeclarationNode::class => $context,
+            CaptureNode::class => $this->rejectCompositionNode($node, $context),
             CheckSecurityCallNode::class, CheckSecurityNode::class, ConfigNode::class, DeprecatedNode::class, DoNode::class, FlushNode::class, TypesNode::class => $context,
             default => $this->rejectUnknownNode($node, $context),
         };
@@ -139,10 +391,174 @@ final class ContextualEscapingAnalyzer
         return $context;
     }
 
+    private function analyzeBlock(string $name, HtmlContext $context, Node $origin, int $index = 0): HtmlContext
+    {
+        if (!$this->compositionScopes) {
+            return $this->rejectCompositionNode($origin, $context);
+        }
+
+        $scope = $this->compositionScopes[\count($this->compositionScopes) - 1];
+        if (!isset($scope['blocks'][$name][$index])) {
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The "%s" block cannot be resolved.', $name));
+
+            return $context->toDead();
+        }
+
+        $definitions = $scope['blocks'][$name];
+        $definition = $definitions[$index];
+        $key = spl_object_id($definition['node']).':'.$index;
+        if (isset($this->activeBlocks[$key])) {
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('Recursive composition of the "%s" block is not supported.', $name));
+
+            return $context->toDead();
+        }
+
+        $this->activeBlocks[$key] = true;
+        $this->blockStack[] = ['name' => $name, 'definitions' => $definitions, 'index' => $index];
+        $this->moduleStack[] = $definition['module'];
+        $context = $this->analyzeNode($definition['node']->getNode('body'), $context);
+        array_pop($this->moduleStack);
+        array_pop($this->blockStack);
+        unset($this->activeBlocks[$key]);
+
+        return $context;
+    }
+
+    private function analyzeBlockExpression(BlockReferenceExpression $node, HtmlContext $context): HtmlContext
+    {
+        if ($node->isDefinedTestEnabled()) {
+            return $context;
+        }
+        $nameNode = $node->getNode('name');
+        if (!$nameNode instanceof ConstantExpression || !\is_string($nameNode->getAttribute('value'))) {
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic block names are not supported by experimental contextual escaping analysis.');
+
+            return $context->toDead();
+        }
+
+        if (!$node->hasNode('template')) {
+            return $this->analyzeBlock($nameNode->getAttribute('value'), $context, $node);
+        }
+
+        $module = $this->resolveTemplateExpression($node->getNode('template'), $node);
+        if (null === $module || null === $scope = $this->createCompositionScope($module)) {
+            return $context->toDead();
+        }
+
+        $this->compositionScopes[] = $scope;
+        $context = $this->analyzeBlock($nameNode->getAttribute('value'), $context, $node);
+        array_pop($this->compositionScopes);
+
+        return $context;
+    }
+
+    private function analyzeParentBlock(ParentExpression $node, HtmlContext $context): HtmlContext
+    {
+        if (!$this->blockStack) {
+            return $this->rejectCompositionNode($node, $context);
+        }
+
+        $frame = $this->blockStack[\count($this->blockStack) - 1];
+
+        return $this->analyzeBlock($frame['name'], $context, $node, 1 + $frame['index']);
+    }
+
+    private function analyzeInclude(IncludeNode $node, HtmlContext $context): HtmlContext
+    {
+        $module = $this->resolveTemplateExpression($node->getNode('expr'), $node, $node->getAttribute('ignore_missing'));
+        if (null === $module) {
+            return $node->getAttribute('ignore_missing') ? $context : $context->toDead();
+        }
+
+        return $this->analyzeModule($module, $context, $node);
+    }
+
+    private function analyzeEmbed(EmbedNode $node, HtmlContext $context): HtmlContext
+    {
+        $index = $node->getAttribute('index');
+        if (!isset($this->embeddedModules[$index])) {
+            return $this->rejectCompositionNode($node, $context);
+        }
+
+        return $this->analyzeModule($this->embeddedModules[$index], $context, $node);
+    }
+
+    private function analyzeMacro(MacroReferenceExpression $node, HtmlContext $context): HtmlContext
+    {
+        if ($node->isDefinedTestEnabled()) {
+            return $context;
+        }
+        if (!$this->compositionScopes || !$this->moduleStack) {
+            return $this->rejectCompositionNode($node, $context);
+        }
+
+        $template = $node->getNode('template');
+        if (!$template instanceof MacroVariable) {
+            return $this->rejectCompositionNode($node, $context);
+        }
+
+        $scope = $this->compositionScopes[\count($this->compositionScopes) - 1];
+        $currentModule = $this->moduleStack[\count($this->moduleStack) - 1];
+        $module = '_self' === $template->getAttribute('name') ? $currentModule : ($scope['imports'][$this->getMacroVariableKey($template, $currentModule)] ?? null);
+        if (null === $module) {
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'The macro template cannot be resolved.');
+
+            return $context->toDead();
+        }
+
+        $name = $node->getAttribute('name');
+        if (!\is_string($name) || null === $macro = $this->findMacroNode($module->getNode('macros'), $name)) {
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic or unknown macro names are not supported by experimental contextual escaping analysis.');
+
+            return $context->toDead();
+        }
+
+        $key = spl_object_id($module).':'.$name;
+        if (isset($this->activeMacros[$key])) {
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('Recursive composition of the "%s" macro is not supported.', $name));
+
+            return $context->toDead();
+        }
+
+        $macroScope = $this->createCompositionScope($module);
+        if (null === $macroScope) {
+            return $context->toDead();
+        }
+
+        $this->activeMacros[$key] = true;
+        $this->compositionScopes[] = $macroScope;
+        $this->moduleStack[] = $module;
+        $context = $this->analyzeNode($macro->getNode('body'), $context);
+        array_pop($this->moduleStack);
+        array_pop($this->compositionScopes);
+        unset($this->activeMacros[$key]);
+
+        return $context;
+    }
+
+    private function findMacroNode(Node $node, string $name): ?MacroNode
+    {
+        if ($node instanceof MacroNode && $name === $node->getAttribute('name')) {
+            return $node;
+        }
+
+        foreach ($node as $child) {
+            if (null !== $macro = $this->findMacroNode($child, $name)) {
+                return $macro;
+            }
+        }
+
+        return null;
+    }
+
     private function analyzePrint(PrintNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
         /** @var AbstractExpression $expression */
         $expression = $node->getNode('expr');
+
+        if ($this->isDirectCompositionExpression($expression)) {
+            return $this->analyzeCompositionExpression($expression, $context, $node);
+        }
 
         if ($expression->isGenerator()) {
             $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, 'Generator output is not supported by experimental contextual escaping analysis.');
@@ -196,6 +612,46 @@ final class ContextualEscapingAnalyzer
         }
 
         return $invalidatesContext ? $context->toDead() : $context;
+    }
+
+    private function isDirectCompositionExpression(AbstractExpression $expression): bool
+    {
+        if ($expression instanceof SupportDefinedTestInterface && $expression->isDefinedTestEnabled()) {
+            return false;
+        }
+
+        return $expression instanceof BlockReferenceExpression
+            || $expression instanceof MacroReferenceExpression
+            || $expression instanceof ParentExpression
+            || ($expression instanceof FunctionExpression && 'include' === $expression->getAttribute('twig_callable')->getName());
+    }
+
+    private function analyzeCompositionExpression(AbstractExpression $expression, HtmlContext $context, PrintNode $origin): HtmlContext
+    {
+        if ($expression instanceof BlockReferenceExpression) {
+            return $this->analyzeBlockExpression($expression, $context);
+        }
+        if ($expression instanceof MacroReferenceExpression) {
+            return $this->analyzeMacro($expression, $context);
+        }
+        if ($expression instanceof ParentExpression) {
+            return $this->analyzeParentBlock($expression, $context);
+        }
+        if ($expression instanceof FunctionExpression && 'include' === $expression->getAttribute('twig_callable')->getName()) {
+            $arguments = $expression->getNode('arguments');
+            if (!$arguments->hasNode(0)) {
+                return $this->rejectCompositionNode($origin, $context);
+            }
+            $ignoreMissing = $arguments->hasNode(3) && $arguments->getNode(3) instanceof ConstantExpression && true === $arguments->getNode(3)->getAttribute('value');
+            $module = $this->resolveTemplateExpression($arguments->getNode(0), $origin, $ignoreMissing);
+            if (null === $module) {
+                return $ignoreMissing ? $context : $context->toDead();
+            }
+
+            return $this->analyzeModule($module, $context, $origin);
+        }
+
+        return $context;
     }
 
     private function inferPlan(PrintNode $node, HtmlContext $context): ?EscapePlan
@@ -516,8 +972,8 @@ final class ContextualEscapingAnalyzer
                 if ($this->containsRawFilter($expression)) {
                     $this->addDiagnostic($node, DiagnosticCode::RawOutput, 'The "raw" filter cannot be verified until typed safe content is implemented.');
                 }
-                if ($this->containsUnsupportedComposition($expression)) {
-                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Template, block, parent block, and macro results are not supported by experimental contextual escaping analysis.');
+                if (!$this->isDirectCompositionExpression($expression) && $this->containsUnsupportedComposition($expression)) {
+                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Nested template, block, parent block, and macro results are not supported by experimental contextual escaping analysis.');
                 }
 
                 return;
@@ -525,9 +981,6 @@ final class ContextualEscapingAnalyzer
             case IfNode::class:
                 $tests = $node->getNode('tests');
                 for ($i = 0; $i < \count($tests); $i += 2) {
-                    if ($tests->hasNode((string) $i)) {
-                        $this->collectCompositionDiagnostic($tests->getNode((string) $i));
-                    }
                     if ($tests->hasNode((string) (1 + $i))) {
                         $this->collectIndependentDiagnostics($tests->getNode((string) (1 + $i)));
                     }
@@ -539,7 +992,6 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case ForNode::class:
-                $this->collectCompositionDiagnostic($node->getNode('seq'));
                 $this->collectIndependentDiagnostics($node->getNode('body'));
                 if ($node->hasNode('else')) {
                     $this->collectIndependentDiagnostics($node->getNode('else'));
@@ -582,28 +1034,7 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case DoNode::class:
-                $this->collectCompositionDiagnostic($node->getNode('expr'));
-
-                return;
-
             case DeprecatedNode::class:
-                foreach ($node as $child) {
-                    $this->collectCompositionDiagnostic($child);
-                }
-
-                return;
-
-            case BlockReferenceNode::class:
-            case BlockReferenceExpression::class:
-            case MacroReferenceExpression::class:
-            case ParentExpression::class:
-            case ImportNode::class:
-            case IncludeNode::class:
-            case EmbedNode::class:
-            case BlockNode::class:
-            case MacroDeclarationNode::class:
-                $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The "%s" node is not supported by experimental contextual escaping analysis.', $node::class));
-
                 return;
 
             case CaptureNode::class:
@@ -621,6 +1052,15 @@ final class ContextualEscapingAnalyzer
             case ConfigNode::class:
             case FlushNode::class:
             case TypesNode::class:
+            case BlockReferenceNode::class:
+            case BlockReferenceExpression::class:
+            case MacroReferenceExpression::class:
+            case ParentExpression::class:
+            case ImportNode::class:
+            case IncludeNode::class:
+            case EmbedNode::class:
+            case BlockNode::class:
+            case MacroDeclarationNode::class:
                 return;
 
             default:
