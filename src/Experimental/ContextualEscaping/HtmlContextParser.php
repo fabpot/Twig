@@ -41,6 +41,7 @@ final class HtmlContextParser
 
     public function __construct(
         private JavaScriptContextParser $javaScriptContextParser,
+        private CssContextParser $cssContextParser,
     ) {
     }
 
@@ -57,6 +58,7 @@ final class HtmlContextParser
             $character = $text[$offset];
             $consume = true;
             $javaScriptContext = $context->getState()->isScriptData() ? $context->getJavaScriptContext() : null;
+            $cssContext = $this->isCssRawTextState($context->getState()) ? $context->getCssContext() : null;
 
             switch ($context->getState()) {
                 case HtmlState::Text:
@@ -516,6 +518,9 @@ final class HtmlContextParser
                 if (null !== $javaScriptContext && null !== $context->getJavaScriptContext()) {
                     $context = $context->withJavaScriptContext($this->javaScriptContextParser->consume($javaScriptContext, $character));
                 }
+                if (null !== $cssContext && null !== $context->getCssContext()) {
+                    $context = $context->withCssContext($this->cssContextParser->consume($cssContext, $character));
+                }
                 ++$offset;
             }
         }
@@ -529,6 +534,10 @@ final class HtmlContextParser
         if (null !== $javaScriptContext = $context->getJavaScriptContext()) {
             $javaScriptContext = '&' === $character ? $javaScriptContext->withState(JavaScriptState::Unknown, JavaScriptSlashContext::Unknown) : $this->javaScriptContextParser->consume($javaScriptContext, $character);
             $context = $context->withJavaScriptContext($javaScriptContext);
+        }
+        if (null !== $cssContext = $context->getCssContext()) {
+            $cssContext = '&' === $character ? $cssContext->withState(CssState::Unknown) : $this->cssContextParser->consume($cssContext, $character);
+            $context = $context->withCssContext($cssContext);
         }
 
         return $context;
@@ -614,6 +623,11 @@ final class HtmlContextParser
     private function isScriptDoubleEscapeDelimiter(string $character): bool
     {
         return '/' === $character || '>' === $character || $this->isHtmlSpace($character);
+    }
+
+    private function isCssRawTextState(HtmlState $state): bool
+    {
+        return \in_array($state, [HtmlState::RawText, HtmlState::RawTextLessThanSign, HtmlState::RawTextEndTagOpen, HtmlState::RawTextEndTagName], true);
     }
 
     private function isHtmlSpace(string $character): bool

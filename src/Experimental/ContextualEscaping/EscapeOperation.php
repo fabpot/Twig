@@ -26,6 +26,8 @@ enum EscapeOperation
     case JavaScriptString;
     case JavaScriptTemplateString;
     case JavaScriptRegExp;
+    case CssValue;
+    case CssString;
     case UrlSchemeFilter;
     case UrlNormalize;
     case UrlPath;

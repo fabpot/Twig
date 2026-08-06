@@ -639,7 +639,7 @@ final class ContextualEscapingAnalyzer
             return $this->contextParser->consume($context, $expression->getAttribute('value'));
         }
 
-        $context = $context->nudgeAttributeValue()->resolveJavaScriptPendingTokenForInterpolation();
+        $context = $context->nudgeAttributeValue()->resolveJavaScriptPendingTokenForInterpolation()->resolveCssPendingTokenForInterpolation();
         $contentTypes = $this->inferContentTypes($expression, $context);
         if (null !== $explicitAutoescape && false !== $explicitAutoescape && $contentTypes->isPlainText()) {
             $strategy = true === $explicitAutoescape ? 'html' : $explicitAutoescape;
@@ -655,9 +655,13 @@ final class ContextualEscapingAnalyzer
         }
 
         $this->result->addInferredEscape(new InferredEscape($node, $plan));
-        $context = $context->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent));
+        $operations = $plan->getOperations();
+        $context = $context
+            ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
+            ->afterCssUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
+            ->afterCssInterpolation($this->cssInterpolationCanChangeContext($contentTypes, $operations));
 
-        return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $plan->getOperations(), true));
+        return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $operations, true));
     }
 
     private function isDirectCompositionExpression(AbstractExpression $expression): bool
@@ -817,6 +821,7 @@ final class ContextualEscapingAnalyzer
                 'js_template' => ContentType::JavaScriptTemplateString,
                 'js_regexp' => ContentType::JavaScriptRegExp,
                 'css' => $escaped ? ContentType::CssString : ContentType::Css,
+                'css_string' => ContentType::CssString,
                 'url' => $escaped ? ContentType::UrlComponent : ContentType::Url,
                 'srcset' => ContentType::Srcset,
                 default => null,
@@ -833,6 +838,9 @@ final class ContextualEscapingAnalyzer
     {
         if ($context->getState()->isScriptData()) {
             return $this->inferJavaScriptPlan($node, $context, $contentTypes, false);
+        }
+        if (HtmlState::RawText === $context->getState() && null !== $context->getCssContext()) {
+            return $this->inferCssPlan($node, $context, $contentTypes, false);
         }
 
         return match ($context->getState()) {
@@ -851,6 +859,9 @@ final class ContextualEscapingAnalyzer
         if (HtmlAttributeType::JavaScript === $context->getAttributeType()) {
             return $this->inferJavaScriptPlan($node, $context, $contentTypes, true, $unquoted);
         }
+        if (HtmlAttributeType::Style === $context->getAttributeType()) {
+            return $this->inferCssPlan($node, $context, $contentTypes, true, $unquoted);
+        }
         if (HtmlAttributeType::Url === $context->getAttributeType()) {
             return $this->inferUrlPlan($node, $context, $contentTypes, $unquoted);
         }
@@ -861,19 +872,18 @@ final class ContextualEscapingAnalyzer
         $requiredContentType = match ($context->getAttributeType()) {
             HtmlAttributeType::Srcset => ContentType::Srcset,
             HtmlAttributeType::Html => ContentType::Html,
-            HtmlAttributeType::UrlList, HtmlAttributeType::Style, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
+            HtmlAttributeType::UrlList, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
         };
         if ($trustedInnermost && HtmlAttributeType::Plain === $context->getAttributeType()) {
             return new EscapePlan([]);
         }
-        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Srcset, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
+        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Srcset, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
             return new EscapePlan($outerPlan);
         }
 
         $analysis = match ($context->getAttributeType()) {
             HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
-            HtmlAttributeType::Style => 'CSS',
             HtmlAttributeType::Html => 'embedded HTML',
             HtmlAttributeType::MetaContent => 'meta refresh',
             HtmlAttributeType::None => 'unknown contextual',
@@ -916,6 +926,111 @@ final class ContextualEscapingAnalyzer
         }
 
         return new EscapePlan([...$operations, ...$outerPlan]);
+    }
+
+    /**
+     * @param list<EscapeOperation> $operations
+     */
+    private function cssInterpolationCanChangeContext(ContentTypeSet $contentTypes, array $operations): bool
+    {
+        if (!$contentTypes->contains(ContentType::TrustedInnermost) && !$contentTypes->contains(ContentType::Css)) {
+            return false;
+        }
+
+        foreach ($operations as $operation) {
+            if (\in_array($operation, [EscapeOperation::CssValue, EscapeOperation::CssString, EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::UrlPath, EscapeOperation::UrlQuery], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function inferCssPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): ?EscapePlan
+    {
+        $cssContext = $context->getCssContext();
+        if (null === $cssContext) {
+            return $this->rejectOutputContext($node, $context);
+        }
+        if (null !== $cssContext->getEscapeDigits() || '' !== $cssContext->getToken() || \in_array($cssContext->getState(), [CssState::Slash, CssState::UrlAfterValue, CssState::Unknown], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousCssContext, 'Output in an ambiguous CSS token, escape, or URL context is not supported.');
+
+            return null;
+        }
+        if (\in_array($cssContext->getState(), [CssState::Comment, CssState::CommentStar], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::CssCommentInterpolation, 'Output expressions inside CSS comments are not supported.');
+
+            return null;
+        }
+        if (\in_array($cssContext->getState(), [CssState::Selector, CssState::Import, CssState::PropertyName], true)) {
+            if (!$contentTypes->contains(ContentType::TrustedInnermost) && !$contentTypes->contains(ContentType::Css)) {
+                $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('Output expressions in CSS %s contexts are not supported.', match ($cssContext->getState()) {
+                    CssState::Selector => 'selector',
+                    CssState::Import => 'import',
+                    CssState::PropertyName => 'property-name',
+                }));
+
+                return null;
+            }
+
+            $operation = null;
+        } elseif (CssState::Value === $cssContext->getState()) {
+            $operation = $contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::Css) ? null : EscapeOperation::CssValue;
+        } elseif (\in_array($cssContext->getState(), [CssState::DoubleQuotedString, CssState::SingleQuotedString], true)) {
+            $operation = $contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::CssString) ? null : EscapeOperation::CssString;
+        } elseif (\in_array($cssContext->getState(), [CssState::UrlStart, CssState::UrlUnquoted, CssState::UrlDoubleQuoted, CssState::UrlSingleQuoted, CssState::ImportUrlDoubleQuoted, CssState::ImportUrlSingleQuoted], true)) {
+            return $this->inferCssUrlPlan($node, $context, $contentTypes, $attribute, $unquoted);
+        } else {
+            throw new \LogicException(\sprintf('Unexpected CSS state "%s".', $cssContext->getState()->name));
+        }
+
+        $operations = null === $operation ? [] : [$operation];
+        if ($attribute) {
+            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+            if (null !== $operation || !$outerSafe) {
+                $operations[] = $outerOperation;
+            }
+        }
+
+        return new EscapePlan($operations);
+    }
+
+    private function inferCssUrlPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted): ?EscapePlan
+    {
+        $urlPart = $context->getCssContext()?->getUrlPart() ?? UrlPart::None;
+        if (\in_array($urlPart, [UrlPart::None, UrlPart::Unknown], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic CSS URL without a static query or fragment delimiter is ambiguous.');
+
+            return null;
+        }
+
+        if ($contentTypes->contains(ContentType::TrustedInnermost)) {
+            $operations = [];
+        } else {
+            if ($contentTypes->contains(ContentType::UrlComponent)) {
+                $operations = [];
+            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
+                $operations = [EscapeOperation::UrlNormalize];
+            } else {
+                $operations = match ($urlPart) {
+                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
+                    UrlPart::Path => [EscapeOperation::UrlPath],
+                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
+                };
+            }
+            $operations[] = EscapeOperation::CssString;
+        }
+
+        if ($attribute) {
+            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+            if ($operations || !$outerSafe) {
+                $operations[] = $outerOperation;
+            }
+        }
+
+        return new EscapePlan($operations);
     }
 
     private function inferJavaScriptPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): ?EscapePlan

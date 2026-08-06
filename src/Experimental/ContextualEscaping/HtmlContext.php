@@ -28,6 +28,7 @@ final class HtmlContext
         private string $candidate = '',
         private UrlPart $urlPart = UrlPart::None,
         private ?JavaScriptContext $javaScriptContext = null,
+        private ?CssContext $cssContext = null,
     ) {
     }
 
@@ -66,6 +67,11 @@ final class HtmlContext
         return $this->javaScriptContext;
     }
 
+    public function getCssContext(): ?CssContext
+    {
+        return $this->cssContext;
+    }
+
     public function isClosingTag(): bool
     {
         return $this->closingTag;
@@ -78,7 +84,7 @@ final class HtmlContext
 
     public function withState(HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function startTag(bool $closingTag, string $tagName = ''): self
@@ -88,7 +94,7 @@ final class HtmlContext
 
     public function appendTagName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function startAttribute(string $character): self
@@ -98,12 +104,23 @@ final class HtmlContext
 
     public function appendAttributeName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function finishAttributeName(HtmlAttributeType $type, HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $type, $this->closingTag, '', HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None, HtmlAttributeType::JavaScript === $type ? new JavaScriptContext() : null);
+        return new self(
+            $state,
+            $this->element,
+            $this->tagName,
+            $this->attributeName,
+            $type,
+            $this->closingTag,
+            '',
+            HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None,
+            HtmlAttributeType::JavaScript === $type ? new JavaScriptContext() : null,
+            HtmlAttributeType::Style === $type ? CssContext::forDeclarationList() : null,
+        );
     }
 
     public function clearAttribute(HtmlState $state): self
@@ -113,22 +130,27 @@ final class HtmlContext
 
     public function enterElement(HtmlState $state, string $element): self
     {
-        return new self($state, strtolower($element), javaScriptContext: HtmlState::ScriptData === $state ? new JavaScriptContext() : null);
+        return new self(
+            $state,
+            strtolower($element),
+            javaScriptContext: HtmlState::ScriptData === $state ? new JavaScriptContext() : null,
+            cssContext: HtmlState::RawText === $state && 'style' === strtolower($element) ? CssContext::forStylesheet() : null,
+        );
     }
 
     public function startCandidate(HtmlState $state, string $candidate = ''): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart, $this->javaScriptContext);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function appendCandidate(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart, $this->javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function resumeSpecial(HtmlState $state): self
     {
-        return new self($state, $this->element, javaScriptContext: $this->javaScriptContext);
+        return new self($state, $this->element, javaScriptContext: $this->javaScriptContext, cssContext: $this->cssContext);
     }
 
     public function consumeUrlCharacter(string $character): self
@@ -146,7 +168,7 @@ final class HtmlContext
             $urlPart = UrlPart::Path;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart, $this->javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart, $this->javaScriptContext, $this->cssContext);
     }
 
     public function afterUrlInterpolation(bool $startsPath): self
@@ -155,12 +177,17 @@ final class HtmlContext
             return $this;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown, $this->javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown, $this->javaScriptContext, $this->cssContext);
     }
 
     public function withJavaScriptContext(JavaScriptContext $javaScriptContext): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $javaScriptContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $javaScriptContext, $this->cssContext);
+    }
+
+    public function withCssContext(CssContext $cssContext): self
+    {
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $cssContext);
     }
 
     public function resolveJavaScriptPendingTokenForInterpolation(): self
@@ -197,6 +224,21 @@ final class HtmlContext
         return $this->withJavaScriptContext($javaScriptContext);
     }
 
+    public function resolveCssPendingTokenForInterpolation(): self
+    {
+        return null === $this->cssContext ? $this : $this->withCssContext($this->cssContext->resolvePendingTokenForInterpolation());
+    }
+
+    public function afterCssUrlInterpolation(bool $startsPath): self
+    {
+        return null === $this->cssContext ? $this : $this->withCssContext($this->cssContext->afterUrlInterpolation($startsPath));
+    }
+
+    public function afterCssInterpolation(bool $unknown): self
+    {
+        return null === $this->cssContext ? $this : $this->withCssContext($this->cssContext->afterInterpolation($unknown));
+    }
+
     public function nudgeAttributeValue(): self
     {
         if (HtmlState::BeforeAttributeValue !== $this->state) {
@@ -225,6 +267,9 @@ final class HtmlContext
     {
         if (null !== $this->javaScriptContext && ($this->state->isScriptData() || HtmlAttributeType::JavaScript === $this->attributeType)) {
             return 'JavaScript '.$this->javaScriptContext->getState()->name;
+        }
+        if (null !== $this->cssContext && (HtmlState::RawText === $this->state || HtmlAttributeType::Style === $this->attributeType)) {
+            return 'CSS '.$this->cssContext->getState()->name;
         }
 
         return match ($this->state) {
