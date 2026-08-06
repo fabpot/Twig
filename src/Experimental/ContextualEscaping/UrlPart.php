@@ -16,14 +16,11 @@ namespace Twig\Experimental\ContextualEscaping;
  *
  * @experimental
  */
-enum EscapeOperation
+enum UrlPart
 {
-    case HtmlText;
-    case HtmlAttribute;
-    case HtmlAttributeUnquoted;
-    case HtmlRcdata;
-    case UrlSchemeFilter;
-    case UrlNormalize;
-    case UrlPath;
-    case UrlQuery;
+    case None;
+    case Start;
+    case Path;
+    case QueryOrFragment;
+    case Unknown;
 }

@@ -53,7 +53,7 @@ class ContextualEscapingLinterTest extends TestCase
     {
         $linter = $this->createLinter(new Environment(new ArrayLoader(), ['optimizations' => 0]));
 
-        $invalid = $linter->lint(new Source('<a href="{{ value }}">', 'first.html.twig'));
+        $invalid = $linter->lint(new Source('<div style="{{ value }}">', 'first.html.twig'));
         $valid = $linter->lint(new Source('<p>{{ value }}</p>', 'second.html.twig'));
 
         $this->assertSame([DiagnosticCode::UnsupportedAttributeContext], $this->getDiagnosticCodes($invalid));
@@ -112,12 +112,7 @@ class ContextualEscapingLinterTest extends TestCase
 
     public static function provideUnsupportedAttributes(): iterable
     {
-        yield 'URL' => ['<a href="{{ value }}">'];
-        yield 'case-insensitive URL' => ['<a HREF="{{ value }}">'];
-        yield 'namespaced URL' => ['<a svg:href="{{ value }}">'];
-        yield 'custom data URL' => ['<div data-url="{{ value }}">'];
-        yield 'custom source attribute' => ['<div image-src="{{ value }}">'];
-        yield 'ping URL list' => ['<a ping="{{ value }}">'];
+        yield 'URL list' => ['<a ping="{{ value }}">'];
         yield 'srcset' => ['<img srcset="{{ value }}">'];
         yield 'link image srcset' => ['<link imagesrcset="{{ value }}">'];
         yield 'style' => ['<div style="{{ value }}">'];
@@ -128,9 +123,143 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'meta refresh content' => ['<meta http-equiv="refresh" content="{{ value }}">'];
     }
 
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideUrlContexts')]
+    public function testInfersPlansForUrlContexts(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideUrlContexts(): iterable
+    {
+        yield 'complete URL' => [
+            '<a href="{{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'HTML-escaped complete URL' => [
+            '<a href="{{ value|e("html_attr") }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'case-insensitive URL attribute' => [
+            '<a HREF="{{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'namespaced URL attribute' => [
+            '<a svg:href="{{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'custom data URL attribute' => [
+            '<div data-url="{{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'custom source URL attribute' => [
+            '<div image-src="{{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'unquoted complete URL' => [
+            '<a href={{ value }}>',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttributeUnquoted]],
+        ];
+        yield 'complete URL after leading control and space characters' => [
+            "<a href=\"\t \n{{ value }}\">",
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'path segment' => [
+            '<a href="/users/{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'multiple path segments' => [
+            '<a href="/{{ first }}/{{ second }}">',
+            [
+                [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+                [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'static URL expression followed by a path segment' => [
+            '<a href="{{ "https://example.com/" }}{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'query value' => [
+            '<a href="/search?q={{ value }}">',
+            [[EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'fragment value' => [
+            '<a href="#{{ value }}">',
+            [[EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'URL-escaped query value' => [
+            '<a href="/search?q={{ value|e("url") }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'URL component followed by a path segment' => [
+            '<a href="{{ first|e("url") }}/{{ second }}">',
+            [
+                [EscapeOperation::HtmlAttribute],
+                [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'dynamic URL followed by a static query' => [
+            '<a href="{{ base }}?q={{ value }}">',
+            [
+                [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+                [EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'branches ending in URL paths' => [
+            '<a href="{% if condition %}/first/{% else %}/second/{% endif %}{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
+    public function testUsesDeclaredUrlTypesAtTheCorrectUrlPart(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_url', static fn () => '', ['is_safe' => ['url']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<a href="{{ safe_url() }}"><a href="/prefix/{{ safe_url() }}"><a href="?next={{ safe_url() }}">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [EscapeOperation::HtmlAttribute],
+            [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+            [EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    public function testRejectsAmbiguousUrlInterpolation(): void
+    {
+        $result = $this->lint('<a href="{{ base }}/{{ path }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousUrlContext], $this->getDiagnosticCodes($result));
+        $this->assertSame([
+            [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    public function testRejectsUrlBranchesEndingInDifferentParts(): void
+    {
+        $result = $this->lint('<a href="{% if condition %}/path/{% else %}?query={% endif %}{{ value }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('URL path', $result->getDiagnostics()[0]->getMessage());
+        $this->assertStringContainsString('URL query or fragment', $result->getDiagnostics()[0]->getMessage());
+    }
+
+    public function testTreatsCharacterReferencesBeforeTheUrlPartAsAmbiguous(): void
+    {
+        $result = $this->lint('<a href="&quest;query={{ value }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousUrlContext], $this->getDiagnosticCodes($result));
+    }
+
     public function testCollectsIndependentDiagnosticsFromEveryBranch(): void
     {
-        $result = $this->lint('{% if a %}<!-- {{ first }} -->{% else %}<a href="{{ second }}"></a>{% endif %}');
+        $result = $this->lint('{% if a %}<!-- {{ first }} -->{% else %}<div style="{{ second }}"></div>{% endif %}');
 
         $this->assertSame([
             DiagnosticCode::CommentInterpolation,
@@ -140,7 +269,7 @@ class ContextualEscapingLinterTest extends TestCase
 
     public function testDiagnosticsRetainTheTemplateLocation(): void
     {
-        $result = $this->lint("<p>text</p>\n<a href=\"{{ value }}\">link</a>", 'page.html.twig');
+        $result = $this->lint("<p>text</p>\n<div style=\"{{ value }}\">content</div>", 'page.html.twig');
         $diagnostic = $result->getDiagnostics()[0];
 
         $this->assertSame(2, $diagnostic->getTemplateLine());
@@ -539,6 +668,14 @@ class ContextualEscapingLinterTest extends TestCase
             ],
             'index.html.twig',
             [[EscapeOperation::HtmlText], []],
+        ];
+        yield 'include in URL path' => [
+            [
+                'index.html.twig' => '<a href="/users/{% include "partial.html.twig" %}">',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
         ];
         yield 'include function' => [
             [

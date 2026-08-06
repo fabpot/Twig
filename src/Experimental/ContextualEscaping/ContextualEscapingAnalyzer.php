@@ -656,7 +656,7 @@ final class ContextualEscapingAnalyzer
 
         $this->result->addInferredEscape(new InferredEscape($node, $plan));
 
-        return $context;
+        return $context->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent));
     }
 
     private function isDirectCompositionExpression(AbstractExpression $expression): bool
@@ -813,7 +813,7 @@ final class ContextualEscapingAnalyzer
                 'html_attr', 'html_attr_relaxed' => ContentType::HtmlAttribute,
                 'js' => $escaped ? ContentType::JavaScriptString : ContentType::JavaScriptExpression,
                 'css' => $escaped ? ContentType::CssString : ContentType::Css,
-                'url' => ContentType::Url,
+                'url' => $escaped ? ContentType::UrlComponent : ContentType::Url,
                 'srcset' => ContentType::Srcset,
                 default => null,
             };
@@ -844,24 +844,27 @@ final class ContextualEscapingAnalyzer
 
     private function inferAttributePlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
     {
+        if (HtmlAttributeType::Url === $context->getAttributeType()) {
+            return $this->inferUrlPlan($node, $context, $contentTypes, $unquoted);
+        }
+
         $attributeContentType = $unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute;
         $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
         $outerPlan = $contentTypes->contains($attributeContentType) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted)) ? [] : [$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute];
         $requiredContentType = match ($context->getAttributeType()) {
-            HtmlAttributeType::Url => ContentType::Url,
             HtmlAttributeType::Srcset => ContentType::Srcset,
             HtmlAttributeType::Html => ContentType::Html,
-            HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
+            HtmlAttributeType::UrlList, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
         };
         if ($trustedInnermost && HtmlAttributeType::Plain === $context->getAttributeType()) {
             return new EscapePlan([]);
         }
-        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Url, HtmlAttributeType::Srcset, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
+        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Srcset, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
             return new EscapePlan($outerPlan);
         }
 
         $analysis = match ($context->getAttributeType()) {
-            HtmlAttributeType::Url => 'URL',
+            HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Style => 'CSS',
             HtmlAttributeType::JavaScript => 'JavaScript',
@@ -877,6 +880,36 @@ final class ContextualEscapingAnalyzer
         }
 
         return new EscapePlan($outerPlan);
+    }
+
+    private function inferUrlPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
+    {
+        if (\in_array($context->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic URL without a static query or fragment delimiter is ambiguous.');
+
+            return null;
+        }
+
+        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+        $outerPlan = $outerSafe ? [] : [$outerOperation];
+        if ($contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::UrlComponent)) {
+            return new EscapePlan($outerPlan);
+        }
+        if (UrlPart::Start === $context->getUrlPart() && $contentTypes->contains(ContentType::Url)) {
+            return new EscapePlan($outerPlan);
+        }
+
+        $operations = match ($context->getUrlPart()) {
+            UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
+            UrlPart::Path => [EscapeOperation::UrlPath],
+            UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
+        };
+        if (!$outerPlan) {
+            $outerPlan = [$outerOperation];
+        }
+
+        return new EscapePlan([...$operations, ...$outerPlan]);
     }
 
     private function analyzeIf(IfNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext

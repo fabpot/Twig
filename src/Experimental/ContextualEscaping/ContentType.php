@@ -29,5 +29,6 @@ enum ContentType
     case Css;
     case CssString;
     case Url;
+    case UrlComponent;
     case Srcset;
 }

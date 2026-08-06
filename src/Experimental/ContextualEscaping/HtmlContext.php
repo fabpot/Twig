@@ -26,6 +26,7 @@ final class HtmlContext
         private HtmlAttributeType $attributeType = HtmlAttributeType::None,
         private bool $closingTag = false,
         private string $candidate = '',
+        private UrlPart $urlPart = UrlPart::None,
     ) {
     }
 
@@ -54,6 +55,11 @@ final class HtmlContext
         return $this->attributeType;
     }
 
+    public function getUrlPart(): UrlPart
+    {
+        return $this->urlPart;
+    }
+
     public function isClosingTag(): bool
     {
         return $this->closingTag;
@@ -66,7 +72,7 @@ final class HtmlContext
 
     public function withState(HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
     }
 
     public function startTag(bool $closingTag, string $tagName = ''): self
@@ -76,7 +82,7 @@ final class HtmlContext
 
     public function appendTagName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate);
+        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
     }
 
     public function startAttribute(string $character): self
@@ -86,12 +92,12 @@ final class HtmlContext
 
     public function appendAttributeName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
     }
 
     public function finishAttributeName(HtmlAttributeType $type, HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $type, $this->closingTag);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $type, $this->closingTag, '', HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None);
     }
 
     public function clearAttribute(HtmlState $state): self
@@ -106,17 +112,44 @@ final class HtmlContext
 
     public function startCandidate(HtmlState $state, string $candidate = ''): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate));
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart);
     }
 
     public function appendCandidate(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character));
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart);
     }
 
     public function resumeSpecial(HtmlState $state): self
     {
         return new self($state, $this->element);
+    }
+
+    public function consumeUrlCharacter(string $character): self
+    {
+        if (HtmlAttributeType::Url !== $this->attributeType) {
+            return $this;
+        }
+
+        $urlPart = $this->urlPart;
+        if ('?' === $character || '#' === $character) {
+            $urlPart = UrlPart::QueryOrFragment;
+        } elseif ('&' === $character && UrlPart::QueryOrFragment !== $urlPart) {
+            $urlPart = UrlPart::Unknown;
+        } elseif (UrlPart::Start === $urlPart && !$this->isUrlLeadingSpaceOrControl($character)) {
+            $urlPart = UrlPart::Path;
+        }
+
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart);
+    }
+
+    public function afterUrlInterpolation(bool $startsPath): self
+    {
+        if (HtmlAttributeType::Url !== $this->attributeType || UrlPart::Start !== $this->urlPart) {
+            return $this;
+        }
+
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown);
     }
 
     public function nudgeAttributeValue(): self
@@ -166,7 +199,14 @@ final class HtmlContext
     {
         return \sprintf('a %s %s attribute', $delimiter, match ($this->attributeType) {
             HtmlAttributeType::Plain => 'plain HTML',
-            HtmlAttributeType::Url => 'URL',
+            HtmlAttributeType::Url => match ($this->urlPart) {
+                UrlPart::Start => 'URL start',
+                UrlPart::Path => 'URL path',
+                UrlPart::QueryOrFragment => 'URL query or fragment',
+                UrlPart::Unknown => 'ambiguous URL',
+                UrlPart::None => 'URL',
+            },
+            HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Style => 'style',
             HtmlAttributeType::JavaScript => 'JavaScript event',
@@ -174,5 +214,10 @@ final class HtmlContext
             HtmlAttributeType::MetaContent => 'meta content',
             HtmlAttributeType::None => 'unknown',
         });
+    }
+
+    private function isUrlLeadingSpaceOrControl(string $character): bool
+    {
+        return 0x20 >= \ord($character);
     }
 }

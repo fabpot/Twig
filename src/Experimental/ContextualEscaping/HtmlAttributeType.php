@@ -21,6 +21,7 @@ enum HtmlAttributeType
     case None;
     case Plain;
     case Url;
+    case UrlList;
     case Srcset;
     case Style;
     case JavaScript;

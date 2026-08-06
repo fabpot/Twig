@@ -20,7 +20,6 @@ final class HtmlContextParser
 {
     private const URL_ATTRIBUTES = [
         'action',
-        'archive',
         'background',
         'cite',
         'classid',
@@ -33,7 +32,6 @@ final class HtmlContextParser
         'itemid',
         'longdesc',
         'manifest',
-        'ping',
         'poster',
         'profile',
         'src',
@@ -160,12 +158,16 @@ final class HtmlContextParser
                 case HtmlState::AttributeValueDoubleQuoted:
                     if ('"' === $character) {
                         $context = $context->clearAttribute(HtmlState::BeforeAttributeName);
+                    } else {
+                        $context = $context->consumeUrlCharacter($character);
                     }
                     break;
 
                 case HtmlState::AttributeValueSingleQuoted:
                     if ("'" === $character) {
                         $context = $context->clearAttribute(HtmlState::BeforeAttributeName);
+                    } else {
+                        $context = $context->consumeUrlCharacter($character);
                     }
                     break;
 
@@ -174,6 +176,8 @@ final class HtmlContextParser
                         $context = $context->clearAttribute(HtmlState::BeforeAttributeName);
                     } elseif ('>' === $character) {
                         $context = $this->completeTag($context);
+                    } else {
+                        $context = $context->consumeUrlCharacter($character);
                     }
                     break;
 
@@ -544,6 +548,9 @@ final class HtmlContextParser
             }
         }
 
+        if (\in_array($name, ['archive', 'ping'], true)) {
+            return HtmlAttributeType::UrlList;
+        }
         if (str_starts_with($name, 'on')) {
             return HtmlAttributeType::JavaScript;
         }

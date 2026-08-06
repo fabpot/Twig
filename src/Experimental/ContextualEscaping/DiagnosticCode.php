@@ -19,6 +19,7 @@ namespace Twig\Experimental\ContextualEscaping;
 enum DiagnosticCode
 {
     case AmbiguousControlFlow;
+    case AmbiguousUrlContext;
     case CommentInterpolation;
     case IncompleteHtmlContext;
     case IncompleteStructuredOutput;
