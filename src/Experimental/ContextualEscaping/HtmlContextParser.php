@@ -39,6 +39,11 @@ final class HtmlContextParser
         'xmlns',
     ];
 
+    public function __construct(
+        private JavaScriptContextParser $javaScriptContextParser,
+    ) {
+    }
+
     public function consume(HtmlContext $context, string $text): HtmlContext
     {
         $length = \strlen($text);
@@ -51,6 +56,7 @@ final class HtmlContextParser
 
             $character = $text[$offset];
             $consume = true;
+            $javaScriptContext = $context->getState()->isScriptData() ? $context->getJavaScriptContext() : null;
 
             switch ($context->getState()) {
                 case HtmlState::Text:
@@ -159,7 +165,7 @@ final class HtmlContextParser
                     if ('"' === $character) {
                         $context = $context->clearAttribute(HtmlState::BeforeAttributeName);
                     } else {
-                        $context = $context->consumeUrlCharacter($character);
+                        $context = $this->consumeAttributeCharacter($context, $character);
                     }
                     break;
 
@@ -167,7 +173,7 @@ final class HtmlContextParser
                     if ("'" === $character) {
                         $context = $context->clearAttribute(HtmlState::BeforeAttributeName);
                     } else {
-                        $context = $context->consumeUrlCharacter($character);
+                        $context = $this->consumeAttributeCharacter($context, $character);
                     }
                     break;
 
@@ -177,7 +183,7 @@ final class HtmlContextParser
                     } elseif ('>' === $character) {
                         $context = $this->completeTag($context);
                     } else {
-                        $context = $context->consumeUrlCharacter($character);
+                        $context = $this->consumeAttributeCharacter($context, $character);
                     }
                     break;
 
@@ -507,8 +513,22 @@ final class HtmlContextParser
             }
 
             if ($consume) {
+                if (null !== $javaScriptContext && null !== $context->getJavaScriptContext()) {
+                    $context = $context->withJavaScriptContext($this->javaScriptContextParser->consume($javaScriptContext, $character));
+                }
                 ++$offset;
             }
+        }
+
+        return $context;
+    }
+
+    private function consumeAttributeCharacter(HtmlContext $context, string $character): HtmlContext
+    {
+        $context = $context->consumeUrlCharacter($character);
+        if (null !== $javaScriptContext = $context->getJavaScriptContext()) {
+            $javaScriptContext = '&' === $character ? $javaScriptContext->withState(JavaScriptState::Unknown, JavaScriptSlashContext::Unknown) : $this->javaScriptContextParser->consume($javaScriptContext, $character);
+            $context = $context->withJavaScriptContext($javaScriptContext);
         }
 
         return $context;

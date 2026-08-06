@@ -27,6 +27,7 @@ final class HtmlContext
         private bool $closingTag = false,
         private string $candidate = '',
         private UrlPart $urlPart = UrlPart::None,
+        private ?JavaScriptContext $javaScriptContext = null,
     ) {
     }
 
@@ -60,6 +61,11 @@ final class HtmlContext
         return $this->urlPart;
     }
 
+    public function getJavaScriptContext(): ?JavaScriptContext
+    {
+        return $this->javaScriptContext;
+    }
+
     public function isClosingTag(): bool
     {
         return $this->closingTag;
@@ -72,7 +78,7 @@ final class HtmlContext
 
     public function withState(HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
     }
 
     public function startTag(bool $closingTag, string $tagName = ''): self
@@ -82,7 +88,7 @@ final class HtmlContext
 
     public function appendTagName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
+        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
     }
 
     public function startAttribute(string $character): self
@@ -92,12 +98,12 @@ final class HtmlContext
 
     public function appendAttributeName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext);
     }
 
     public function finishAttributeName(HtmlAttributeType $type, HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $type, $this->closingTag, '', HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $type, $this->closingTag, '', HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None, HtmlAttributeType::JavaScript === $type ? new JavaScriptContext() : null);
     }
 
     public function clearAttribute(HtmlState $state): self
@@ -107,22 +113,22 @@ final class HtmlContext
 
     public function enterElement(HtmlState $state, string $element): self
     {
-        return new self($state, strtolower($element));
+        return new self($state, strtolower($element), javaScriptContext: HtmlState::ScriptData === $state ? new JavaScriptContext() : null);
     }
 
     public function startCandidate(HtmlState $state, string $candidate = ''): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart, $this->javaScriptContext);
     }
 
     public function appendCandidate(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart, $this->javaScriptContext);
     }
 
     public function resumeSpecial(HtmlState $state): self
     {
-        return new self($state, $this->element);
+        return new self($state, $this->element, javaScriptContext: $this->javaScriptContext);
     }
 
     public function consumeUrlCharacter(string $character): self
@@ -140,7 +146,7 @@ final class HtmlContext
             $urlPart = UrlPart::Path;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart, $this->javaScriptContext);
     }
 
     public function afterUrlInterpolation(bool $startsPath): self
@@ -149,7 +155,46 @@ final class HtmlContext
             return $this;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown, $this->javaScriptContext);
+    }
+
+    public function withJavaScriptContext(JavaScriptContext $javaScriptContext): self
+    {
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $javaScriptContext);
+    }
+
+    public function resolveJavaScriptPendingTokenForInterpolation(): self
+    {
+        if (null === $this->javaScriptContext) {
+            return $this;
+        }
+        if (JavaScriptState::Minus === $this->javaScriptContext->getState()) {
+            return $this->withJavaScriptContext($this->javaScriptContext->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp));
+        }
+        if (JavaScriptState::Slash !== $this->javaScriptContext->getState()) {
+            return $this;
+        }
+
+        $javaScriptContext = match ($this->javaScriptContext->getSlashContext()) {
+            JavaScriptSlashContext::RegExp => $this->javaScriptContext->withState(JavaScriptState::RegExp),
+            JavaScriptSlashContext::Division => $this->javaScriptContext->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp),
+            JavaScriptSlashContext::Unknown => $this->javaScriptContext->withState(JavaScriptState::Unknown, JavaScriptSlashContext::Unknown),
+        };
+
+        return $this->withJavaScriptContext($javaScriptContext);
+    }
+
+    public function afterJavaScriptInterpolation(bool $valueLike): self
+    {
+        if (null === $this->javaScriptContext || JavaScriptState::Code !== $this->javaScriptContext->getState()) {
+            return $this;
+        }
+
+        $javaScriptContext = $this->javaScriptContext
+            ->withToken(JavaScriptTokenType::None, '')
+            ->withSlashContext($valueLike ? JavaScriptSlashContext::Division : JavaScriptSlashContext::Unknown);
+
+        return $this->withJavaScriptContext($javaScriptContext);
     }
 
     public function nudgeAttributeValue(): self
@@ -178,8 +223,8 @@ final class HtmlContext
 
     public function describe(): string
     {
-        if ($this->state->isScriptData()) {
-            return 'raw text in <script>';
+        if (null !== $this->javaScriptContext && ($this->state->isScriptData() || HtmlAttributeType::JavaScript === $this->attributeType)) {
+            return 'JavaScript '.$this->javaScriptContext->getState()->name;
         }
 
         return match ($this->state) {

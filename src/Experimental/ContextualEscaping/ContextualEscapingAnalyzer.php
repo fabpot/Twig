@@ -639,7 +639,7 @@ final class ContextualEscapingAnalyzer
             return $this->contextParser->consume($context, $expression->getAttribute('value'));
         }
 
-        $context = $context->nudgeAttributeValue();
+        $context = $context->nudgeAttributeValue()->resolveJavaScriptPendingTokenForInterpolation();
         $contentTypes = $this->inferContentTypes($expression, $context);
         if (null !== $explicitAutoescape && false !== $explicitAutoescape && $contentTypes->isPlainText()) {
             $strategy = true === $explicitAutoescape ? 'html' : $explicitAutoescape;
@@ -655,8 +655,9 @@ final class ContextualEscapingAnalyzer
         }
 
         $this->result->addInferredEscape(new InferredEscape($node, $plan));
+        $context = $context->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent));
 
-        return $context->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent));
+        return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $plan->getOperations(), true));
     }
 
     private function isDirectCompositionExpression(AbstractExpression $expression): bool
@@ -812,6 +813,9 @@ final class ContextualEscapingAnalyzer
                 'html' => ContentType::Html,
                 'html_attr', 'html_attr_relaxed' => ContentType::HtmlAttribute,
                 'js' => $escaped ? ContentType::JavaScriptString : ContentType::JavaScriptExpression,
+                'js_string' => ContentType::JavaScriptString,
+                'js_template' => ContentType::JavaScriptTemplateString,
+                'js_regexp' => ContentType::JavaScriptRegExp,
                 'css' => $escaped ? ContentType::CssString : ContentType::Css,
                 'url' => $escaped ? ContentType::UrlComponent : ContentType::Url,
                 'srcset' => ContentType::Srcset,
@@ -828,7 +832,7 @@ final class ContextualEscapingAnalyzer
     private function inferPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes): ?EscapePlan
     {
         if ($context->getState()->isScriptData()) {
-            return $this->rejectOutputContext($node, $context);
+            return $this->inferJavaScriptPlan($node, $context, $contentTypes, false);
         }
 
         return match ($context->getState()) {
@@ -844,6 +848,9 @@ final class ContextualEscapingAnalyzer
 
     private function inferAttributePlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
     {
+        if (HtmlAttributeType::JavaScript === $context->getAttributeType()) {
+            return $this->inferJavaScriptPlan($node, $context, $contentTypes, true, $unquoted);
+        }
         if (HtmlAttributeType::Url === $context->getAttributeType()) {
             return $this->inferUrlPlan($node, $context, $contentTypes, $unquoted);
         }
@@ -854,7 +861,7 @@ final class ContextualEscapingAnalyzer
         $requiredContentType = match ($context->getAttributeType()) {
             HtmlAttributeType::Srcset => ContentType::Srcset,
             HtmlAttributeType::Html => ContentType::Html,
-            HtmlAttributeType::UrlList, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
+            HtmlAttributeType::UrlList, HtmlAttributeType::Style, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
         };
         if ($trustedInnermost && HtmlAttributeType::Plain === $context->getAttributeType()) {
             return new EscapePlan([]);
@@ -867,7 +874,6 @@ final class ContextualEscapingAnalyzer
             HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Style => 'CSS',
-            HtmlAttributeType::JavaScript => 'JavaScript',
             HtmlAttributeType::Html => 'embedded HTML',
             HtmlAttributeType::MetaContent => 'meta refresh',
             HtmlAttributeType::None => 'unknown contextual',
@@ -910,6 +916,42 @@ final class ContextualEscapingAnalyzer
         }
 
         return new EscapePlan([...$operations, ...$outerPlan]);
+    }
+
+    private function inferJavaScriptPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): ?EscapePlan
+    {
+        $javaScriptContext = $context->getJavaScriptContext();
+        if (null === $javaScriptContext) {
+            return $this->rejectOutputContext($node, $context);
+        }
+        if ($javaScriptContext->isEscaped() || $javaScriptContext->hasTemplateDollar() || (JavaScriptState::Code === $javaScriptContext->getState() && JavaScriptTokenType::None !== $javaScriptContext->getTokenType()) || \in_array($javaScriptContext->getState(), [JavaScriptState::Slash, JavaScriptState::LessThan, JavaScriptState::HtmlOpenCommentBang, JavaScriptState::HtmlOpenCommentDash, JavaScriptState::Minus, JavaScriptState::HtmlCloseCommentDashDash, JavaScriptState::Unknown], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousJavaScriptContext, 'Output in an ambiguous JavaScript token or slash context is not supported.');
+
+            return null;
+        }
+        if (\in_array($javaScriptContext->getState(), [JavaScriptState::LineComment, JavaScriptState::BlockComment, JavaScriptState::BlockCommentStar], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::JavaScriptCommentInterpolation, 'Output expressions inside JavaScript comments are not supported.');
+
+            return null;
+        }
+
+        $trusted = $contentTypes->contains(ContentType::TrustedInnermost);
+        $operation = match ($javaScriptContext->getState()) {
+            JavaScriptState::Code => $trusted || $contentTypes->contains(ContentType::JavaScriptExpression) ? null : EscapeOperation::JavaScriptValue,
+            JavaScriptState::DoubleQuotedString, JavaScriptState::SingleQuotedString => $trusted || $contentTypes->contains(ContentType::JavaScriptString) ? null : EscapeOperation::JavaScriptString,
+            JavaScriptState::TemplateString => $trusted || $contentTypes->contains(ContentType::JavaScriptTemplateString) ? null : EscapeOperation::JavaScriptTemplateString,
+            JavaScriptState::RegExp => $trusted || $contentTypes->contains(ContentType::JavaScriptRegExp) ? null : EscapeOperation::JavaScriptRegExp,
+        };
+        $operations = null === $operation ? [] : [$operation];
+        if ($attribute) {
+            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+            if (null !== $operation || !$outerSafe) {
+                $operations[] = $outerOperation;
+            }
+        }
+
+        return new EscapePlan($operations);
     }
 
     private function analyzeIf(IfNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext

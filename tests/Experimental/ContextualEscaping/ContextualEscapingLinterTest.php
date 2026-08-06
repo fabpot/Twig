@@ -21,6 +21,7 @@ use Twig\Experimental\ContextualEscaping\DiagnosticCode;
 use Twig\Experimental\ContextualEscaping\EnvironmentTemplateResolver;
 use Twig\Experimental\ContextualEscaping\EscapeOperation;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
+use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Loader\ArrayLoader;
 use Twig\Node\Node;
 use Twig\Source;
@@ -98,8 +99,8 @@ class ContextualEscapingLinterTest extends TestCase
     {
         $result = $this->lint('{{ "<script>" }}{{ value }}{{ "</script>" }}');
 
-        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
-        $this->assertSame([], $this->getPlans($result));
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($result));
     }
 
     #[DataProvider('provideUnsupportedAttributes')]
@@ -117,8 +118,6 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'link image srcset' => ['<link imagesrcset="{{ value }}">'];
         yield 'style' => ['<div style="{{ value }}">'];
         yield 'escaped CSS string' => ['<div style="{{ value|e("css") }}">'];
-        yield 'event handler' => ['<button onclick="{{ value }}">'];
-        yield 'escaped JavaScript string' => ['<button onclick="{{ value|e("js") }}">'];
         yield 'embedded HTML' => ['<iframe srcdoc="{{ value }}"></iframe>'];
         yield 'meta refresh content' => ['<meta http-equiv="refresh" content="{{ value }}">'];
     }
@@ -293,10 +292,6 @@ class ContextualEscapingLinterTest extends TestCase
 
     public static function provideUnsupportedRawTextContexts(): iterable
     {
-        yield 'script' => ['<script>{{ value }}</script>'];
-        yield 'self-closing script syntax' => ['<script/>{{ value }}</script>'];
-        yield 'double-escaped script data' => ['<script><!-- <script> </script> {{ value }}</script>'];
-        yield 'branch with irrelevant script candidate' => ['<script><!--{% if condition %}<foo>{% else %}<bar>{% endif %}{{ value }}</script>'];
         yield 'style' => ['<style>{{ value }}</style>'];
         yield 'legacy raw-text element' => ['<xmp>{{ value }}</xmp>'];
         yield 'iframe fallback content' => ['<iframe>{{ value }}</iframe>'];
@@ -304,9 +299,175 @@ class ContextualEscapingLinterTest extends TestCase
 
     public function testCollectsEveryUnsupportedOutputContextDiagnostic(): void
     {
-        $result = $this->lint('<script>{{ first }}{{ second }}</script>');
+        $result = $this->lint('<style>{{ first }}{{ second }}</style>');
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext, DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideJavaScriptContexts')]
+    public function testInfersPlansForJavaScriptContexts(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideJavaScriptContexts(): iterable
+    {
+        yield 'script value' => [
+            '<script>const value = {{ value }};</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'self-closing script syntax' => [
+            '<script/>{{ value }}</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'double-quoted string' => [
+            '<script>const value = "{{ value }}";</script>',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'single-quoted string' => [
+            "<script>const value = '{{ value }}';</script>",
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'template string' => [
+            '<script>const value = `{{ value }}`;</script>',
+            [[EscapeOperation::JavaScriptTemplateString]],
+        ];
+        yield 'template string expression' => [
+            '<script>const value = `${other + {{ value }}}`;</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'nested template string' => [
+            '<script>const value = `${`nested {{ value }}`}`;</script>',
+            [[EscapeOperation::JavaScriptTemplateString]],
+        ];
+        yield 'regular expression' => [
+            '<script>const value = /prefix{{ value }}suffix/g;</script>',
+            [[EscapeOperation::JavaScriptRegExp]],
+        ];
+        yield 'regular expression character class' => [
+            '<script>const value = /[{{ value }}]/g;</script>',
+            [[EscapeOperation::JavaScriptRegExp]],
+        ];
+        yield 'regular expression after return' => [
+            '<script>function value() { return /prefix{{ value }}/; }</script>',
+            [[EscapeOperation::JavaScriptRegExp]],
+        ];
+        yield 'division operand' => [
+            '<script>const result = other / {{ value }};</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'subtraction operand without whitespace' => [
+            '<script>const result = other-{{ value }};</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'division after a serialized value' => [
+            '<script>const result = {{ first }}/{{ second }};</script>',
+            [[EscapeOperation::JavaScriptValue], [EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'value after a less-than operator' => [
+            '<script>const result = first < second ? {{ value }} : null;</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'quoted event handler value' => [
+            '<button onclick="handle({{ value }})">',
+            [[EscapeOperation::JavaScriptValue, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'event handler string' => [
+            "<button onclick=\"handle('{{ value }}')\">",
+            [[EscapeOperation::JavaScriptString, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'unquoted event handler value' => [
+            '<button onclick=handle({{ value }})>',
+            [[EscapeOperation::JavaScriptValue, EscapeOperation::HtmlAttributeUnquoted]],
+        ];
+        yield 'explicit JavaScript string inside a string' => [
+            "<button onclick=\"handle('{{ value|e('js') }}')\">",
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'explicit JavaScript string used as a value' => [
+            '<button onclick="handle({{ value|e("js") }})">',
+            [[EscapeOperation::JavaScriptValue, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'trusted event handler expression' => [
+            '<button onclick="{{ value|raw }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
+    public function testUsesDeclaredJavaScriptTypes(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_js', static fn () => '', ['is_safe' => ['js']]));
+        $environment->addFunction(new TwigFunction('safe_js_string', static fn () => '', ['is_safe' => ['js_string']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<script>{{ safe_js() }}</script><button onclick="{{ safe_js() }}"><button onclick="value=\'{{ safe_js_string() }}\'">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [],
+            [EscapeOperation::HtmlAttribute],
+            [EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    public function testTreatsSlashAfterTrustedJavaScriptAsAmbiguous(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_js', static fn () => '', ['is_safe' => ['js']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<script>{{ safe_js() }}/{{ value }}</script>', 'index.html.twig'));
+
+        $this->assertSame([DiagnosticCode::AmbiguousJavaScriptContext], $this->getDiagnosticCodes($result));
+        $this->assertSame([[]], $this->getPlans($result));
+    }
+
+    #[DataProvider('provideJavaScriptComments')]
+    public function testRejectsOutputInsideJavaScriptComments(string $template): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([DiagnosticCode::JavaScriptCommentInterpolation], $this->getDiagnosticCodes($result));
+    }
+
+    public static function provideJavaScriptComments(): iterable
+    {
+        yield 'line comment' => ["<script>// {{ value }}\n</script>"];
+        yield 'block comment' => ['<script>/* {{ value }} */</script>'];
+        yield 'HTML-like open comment' => ['<script><!-- {{ value }}\n</script>'];
+        yield 'HTML-like close comment' => ['<script>--> {{ value }}\n</script>'];
+        yield 'HTML double-escaped script data' => ['<script><!-- <script> </script> {{ value }}</script>'];
+    }
+
+    #[DataProvider('provideAmbiguousJavaScript')]
+    public function testRejectsAmbiguousJavaScriptContexts(string $template): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([DiagnosticCode::AmbiguousJavaScriptContext], $this->getDiagnosticCodes($result));
+    }
+
+    public static function provideAmbiguousJavaScript(): iterable
+    {
+        yield 'identifier token' => ['<script>identifier{{ value }}</script>'];
+        yield 'unknown slash after a closing brace' => ['<script>{}/{{ value }}/</script>'];
+        yield 'escaped string position' => ['<script>"\\{{ value }}"</script>'];
+        yield 'template interpolation candidate' => ['<script>`${{ value }}`</script>'];
+        yield 'event-handler character reference' => ['<button onclick="value=&quot;{{ value }}&quot;">'];
+    }
+
+    public function testRejectsJavaScriptBranchesEndingInDifferentLexicalContexts(): void
+    {
+        $result = $this->lint('<script>{% if condition %}"string{% endif %}{{ value }}</script>');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('JavaScript DoubleQuotedString', $result->getDiagnostics()[0]->getMessage());
+        $this->assertStringContainsString('JavaScript Code', $result->getDiagnostics()[0]->getMessage());
     }
 
     #[DataProvider('provideStructuralInterpolation')]
@@ -342,7 +503,7 @@ class ContextualEscapingLinterTest extends TestCase
         $result = $this->lint(\sprintf('{%% if %s %%}<script>{%% endif %%}{{ value }}', $condition));
 
         $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
-        $this->assertStringContainsString('raw text in <script> and HTML text', $result->getDiagnostics()[0]->getMessage());
+        $this->assertStringContainsString('JavaScript Code and HTML text', $result->getDiagnostics()[0]->getMessage());
     }
 
     public static function provideConditions(): iterable
@@ -412,7 +573,7 @@ class ContextualEscapingLinterTest extends TestCase
         $module = $environment->parse($environment->tokenize(new Source('{{ value }}', 'index.html.twig')));
         $module->getNode('body')->getNode(0)->getNode('expr')->setAttribute('is_generator', true);
 
-        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser()))->analyze($module);
+        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser())))->analyze($module);
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
@@ -563,18 +724,14 @@ class ContextualEscapingLinterTest extends TestCase
         ], $this->getPlans($result));
     }
 
-    public function testDefersSafeLanguageContentUntilLexicalAnalysis(): void
+    public function testDefersSafeCssContentUntilLexicalAnalysis(): void
     {
         $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
-        $environment->addFunction(new TwigFunction('safe_js', static fn () => '', ['is_safe' => ['js']]));
         $environment->addFunction(new TwigFunction('safe_css', static fn () => '', ['is_safe' => ['css']]));
 
-        $result = $this->createLinter($environment)->lint(new Source('<button onclick="{{ safe_js() }}"><div style="{{ safe_css() }}">', 'index.html.twig'));
+        $result = $this->createLinter($environment)->lint(new Source('<div style="{{ safe_css() }}">', 'index.html.twig'));
 
-        $this->assertSame([
-            DiagnosticCode::UnsupportedAttributeContext,
-            DiagnosticCode::UnsupportedAttributeContext,
-        ], $this->getDiagnosticCodes($result));
+        $this->assertSame([DiagnosticCode::UnsupportedAttributeContext], $this->getDiagnosticCodes($result));
         $this->assertSame([], $result->getInferredEscapes());
     }
 
@@ -676,6 +833,14 @@ class ContextualEscapingLinterTest extends TestCase
             ],
             'index.html.twig',
             [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'include in JavaScript' => [
+            [
+                'index.html.twig' => '<script>const value = {% include "partial.html.twig" %};</script>',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::JavaScriptValue]],
         ];
         yield 'include function' => [
             [
@@ -821,7 +986,8 @@ class ContextualEscapingLinterTest extends TestCase
             'open-script.html.twig' => '<script>',
         ], 'index.html.twig');
 
-        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($result));
     }
 
     public function testRejectsRecursiveComposition(): void
@@ -902,7 +1068,7 @@ class ContextualEscapingLinterTest extends TestCase
 
     private function createLinter(Environment $environment): ContextualEscapingLinter
     {
-        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(), new EnvironmentTemplateResolver($environment)));
+        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser()), new EnvironmentTemplateResolver($environment)));
     }
 
     /**

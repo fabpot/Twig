@@ -26,6 +26,8 @@ enum ContentType
     case HtmlRcdata;
     case JavaScriptExpression;
     case JavaScriptString;
+    case JavaScriptTemplateString;
+    case JavaScriptRegExp;
     case Css;
     case CssString;
     case Url;

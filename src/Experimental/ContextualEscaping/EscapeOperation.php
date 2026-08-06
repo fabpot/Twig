@@ -22,6 +22,10 @@ enum EscapeOperation
     case HtmlAttribute;
     case HtmlAttributeUnquoted;
     case HtmlRcdata;
+    case JavaScriptValue;
+    case JavaScriptString;
+    case JavaScriptTemplateString;
+    case JavaScriptRegExp;
     case UrlSchemeFilter;
     case UrlNormalize;
     case UrlPath;
