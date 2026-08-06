@@ -34,6 +34,7 @@ use Twig\Node\Expression\OperatorEscapeInterface;
 use Twig\Node\Expression\ParentExpression;
 use Twig\Node\Expression\SupportDefinedTestInterface;
 use Twig\Node\Expression\Variable\ContextVariable;
+use Twig\Node\Expression\Variable\LocalVariable;
 use Twig\Node\Expression\Variable\MacroVariable;
 use Twig\Node\FlushNode;
 use Twig\Node\ForElseNode;
@@ -51,6 +52,8 @@ use Twig\Node\SetNode;
 use Twig\Node\TextNode;
 use Twig\Node\TypesNode;
 use Twig\Node\WithNode;
+use Twig\TwigFilter;
+use Twig\TwigFunction;
 
 /**
  * @internal
@@ -88,8 +91,11 @@ final class ContextualEscapingAnalyzer
     /** @var array<string, true> */
     private array $activeBlocks = [];
 
-    /** @var array<string, true> */
+    /** @var array<string, HtmlContext> */
     private array $activeMacros = [];
+
+    /** @var array<string, ContentTypeSet> */
+    private array $contentTypes = [];
 
     public function __construct(
         private HtmlContextParser $contextParser,
@@ -108,6 +114,7 @@ final class ContextualEscapingAnalyzer
         $this->activeModules = [];
         $this->activeBlocks = [];
         $this->activeMacros = [];
+        $this->contentTypes = [];
 
         $context = $this->analyzeModule($module, new HtmlContext(), $module);
 
@@ -362,9 +369,9 @@ final class ContextualEscapingAnalyzer
             IfNode::class => $this->analyzeIf($node, $context, $explicitAutoescape),
             ForNode::class => $this->analyzeFor($node, $context, $explicitAutoescape),
             ForElseNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
-            WithNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
+            WithNode::class => $this->analyzeWith($node, $context, $explicitAutoescape),
             AutoEscapeNode::class => $this->analyzeAutoEscape($node, $context),
-            SetNode::class => $this->analyzeSet($node, $context),
+            SetNode::class => $this->analyzeSet($node, $context, $explicitAutoescape),
             BlockReferenceNode::class => $this->analyzeBlock($node->getAttribute('name'), $context, $node),
             BlockReferenceExpression::class => $this->analyzeBlockExpression($node, $context),
             ParentExpression::class => $this->analyzeParentBlock($node, $context),
@@ -373,7 +380,7 @@ final class ContextualEscapingAnalyzer
             MacroReferenceExpression::class => $this->analyzeMacro($node, $context),
             BlockNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
             ImportNode::class, MacroDeclarationNode::class => $context,
-            CaptureNode::class => $this->rejectCompositionNode($node, $context),
+            CaptureNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
             CheckSecurityCallNode::class, CheckSecurityNode::class, ConfigNode::class, DeprecatedNode::class, DoNode::class, FlushNode::class, TypesNode::class => $context,
             default => $this->rejectUnknownNode($node, $context),
         };
@@ -399,9 +406,7 @@ final class ContextualEscapingAnalyzer
 
         $scope = $this->compositionScopes[\count($this->compositionScopes) - 1];
         if (!isset($scope['blocks'][$name][$index])) {
-            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The "%s" block cannot be resolved.', $name));
-
-            return $context->toDead();
+            return $context;
         }
 
         $definitions = $scope['blocks'][$name];
@@ -416,7 +421,9 @@ final class ContextualEscapingAnalyzer
         $this->activeBlocks[$key] = true;
         $this->blockStack[] = ['name' => $name, 'definitions' => $definitions, 'index' => $index];
         $this->moduleStack[] = $definition['module'];
+        $contentTypes = $this->contentTypes;
         $context = $this->analyzeNode($definition['node']->getNode('body'), $context);
+        $this->contentTypes = $contentTypes;
         array_pop($this->moduleStack);
         array_pop($this->blockStack);
         unset($this->activeBlocks[$key]);
@@ -470,7 +477,16 @@ final class ContextualEscapingAnalyzer
             return $node->getAttribute('ignore_missing') ? $context : $context->toDead();
         }
 
-        return $this->analyzeModule($module, $context, $node);
+        $contentTypes = $this->contentTypes;
+        if ($node->hasNode('variables')) {
+            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
+        } elseif ($node->getAttribute('only')) {
+            $this->contentTypes = [];
+        }
+        $context = $this->analyzeModule($module, $context, $node);
+        $this->contentTypes = $contentTypes;
+
+        return $context;
     }
 
     private function analyzeEmbed(EmbedNode $node, HtmlContext $context): HtmlContext
@@ -480,7 +496,16 @@ final class ContextualEscapingAnalyzer
             return $this->rejectCompositionNode($node, $context);
         }
 
-        return $this->analyzeModule($this->embeddedModules[$index], $context, $node);
+        $contentTypes = $this->contentTypes;
+        if ($node->hasNode('variables')) {
+            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
+        } elseif ($node->getAttribute('only')) {
+            $this->contentTypes = [];
+        }
+        $context = $this->analyzeModule($this->embeddedModules[$index], $context, $node);
+        $this->contentTypes = $contentTypes;
+
+        return $context;
     }
 
     private function analyzeMacro(MacroReferenceExpression $node, HtmlContext $context): HtmlContext
@@ -515,7 +540,11 @@ final class ContextualEscapingAnalyzer
 
         $key = spl_object_id($module).':'.$name;
         if (isset($this->activeMacros[$key])) {
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('Recursive composition of the "%s" macro is not supported.', $name));
+            $input = $this->activeMacros[$key]->nudgeAttributeValue();
+            if ($input->equals($context->nudgeAttributeValue())) {
+                return $context;
+            }
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('Recursive composition of the "%s" macro enters an incompatible context.', $name));
 
             return $context->toDead();
         }
@@ -525,15 +554,53 @@ final class ContextualEscapingAnalyzer
             return $context->toDead();
         }
 
-        $this->activeMacros[$key] = true;
+        $this->activeMacros[$key] = $context;
         $this->compositionScopes[] = $macroScope;
         $this->moduleStack[] = $module;
+        $contentTypes = $this->contentTypes;
+        $this->contentTypes = $this->getMacroArgumentContentTypes($node, $macro);
         $context = $this->analyzeNode($macro->getNode('body'), $context);
+        $this->contentTypes = $contentTypes;
         array_pop($this->moduleStack);
         array_pop($this->compositionScopes);
         unset($this->activeMacros[$key]);
 
         return $context;
+    }
+
+    /**
+     * @return array<string, ContentTypeSet>
+     */
+    private function getMacroArgumentContentTypes(MacroReferenceExpression $reference, MacroNode $macro): array
+    {
+        $macroArguments = $macro->getNode('arguments');
+        $referenceArguments = $reference->getNode('arguments');
+        if (!$macroArguments instanceof ArrayExpression || !$referenceArguments instanceof ArrayExpression) {
+            return [];
+        }
+
+        $parameters = [];
+        foreach ($macroArguments->getKeyValuePairs() as $pair) {
+            $name = $pair['key']->getAttribute('name');
+            if (\is_string($name)) {
+                $parameters[] = $name;
+            }
+        }
+
+        $contentTypes = [];
+        foreach ($referenceArguments->getKeyValuePairs() as $index => $pair) {
+            $name = $pair['key']->getAttribute('name');
+            $name = \is_string($name) ? $name : ($parameters[$index] ?? null);
+            if (null === $name || !$pair['value'] instanceof AbstractExpression) {
+                continue;
+            }
+            $valueContentTypes = $this->inferContentTypes($pair['value'], new HtmlContext());
+            if (!$valueContentTypes->isPlainText()) {
+                $contentTypes['context:'.$name] = $valueContentTypes;
+            }
+        }
+
+        return $contentTypes;
     }
 
     private function findMacroNode(Node $node, string $name): ?MacroNode
@@ -573,45 +640,23 @@ final class ContextualEscapingAnalyzer
         }
 
         $context = $context->nudgeAttributeValue();
-        $plan = $this->inferPlan($node, $context);
+        $contentTypes = $this->inferContentTypes($expression, $context);
+        if (null !== $explicitAutoescape && false !== $explicitAutoescape && $contentTypes->isPlainText()) {
+            $strategy = true === $explicitAutoescape ? 'html' : $explicitAutoescape;
+            $contentTypes = $this->contentTypesForStrategies([$strategy]);
+            if ($contentTypes->isPlainText()) {
+                $this->addDiagnostic($node, DiagnosticCode::MismatchedExplicitEscaping, \sprintf('The explicit "%s" autoescaping strategy has no known contextual content type.', $strategy));
+            }
+        }
+
+        $plan = $this->inferPlan($node, $context, $contentTypes);
         if (null === $plan) {
             return $this->contextAfterUnsupportedPrint($context);
         }
 
         $this->result->addInferredEscape(new InferredEscape($node, $plan));
 
-        $invalidatesContext = false;
-        if ($this->containsRawFilter($expression)) {
-            $this->addDiagnostic($node, DiagnosticCode::RawOutput, 'The "raw" filter cannot be verified until typed safe content is implemented.');
-            $invalidatesContext = true;
-        }
-        if ($this->containsUnsupportedComposition($expression)) {
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Template, block, parent block, and macro results are not supported by experimental contextual escaping analysis.');
-            $invalidatesContext = true;
-        }
-
-        $contextDescription = $this->describePlan($plan);
-        if (null !== $explicitAutoescape && false !== $explicitAutoescape) {
-            $strategy = true === $explicitAutoescape ? 'html' : $explicitAutoescape;
-            if (!$this->isExplicitStrategyCompatible($plan, $strategy)) {
-                $this->addDiagnostic($node, DiagnosticCode::MismatchedExplicitEscaping, \sprintf('The explicit "%s" autoescaping strategy does not satisfy the inferred %s context.', $strategy, $contextDescription));
-                $invalidatesContext = true;
-            }
-        }
-
-        foreach ($this->findExplicitEscapingStrategies($expression) as [$strategy, $line]) {
-            if (!$this->isExplicitStrategyCompatible($plan, $strategy)) {
-                $this->result->addDiagnostic(new Diagnostic(
-                    DiagnosticCode::MismatchedExplicitEscaping,
-                    \sprintf('The explicit "%s" escaping strategy does not satisfy the inferred %s context.', $strategy ?? 'dynamic', $contextDescription),
-                    $line,
-                    $node->getTemplateName(),
-                ));
-                $invalidatesContext = true;
-            }
-        }
-
-        return $invalidatesContext ? $context->toDead() : $context;
+        return $context;
     }
 
     private function isDirectCompositionExpression(AbstractExpression $expression): bool
@@ -626,7 +671,7 @@ final class ContextualEscapingAnalyzer
             || ($expression instanceof FunctionExpression && 'include' === $expression->getAttribute('twig_callable')->getName());
     }
 
-    private function analyzeCompositionExpression(AbstractExpression $expression, HtmlContext $context, PrintNode $origin): HtmlContext
+    private function analyzeCompositionExpression(AbstractExpression $expression, HtmlContext $context, Node $origin): HtmlContext
     {
         if ($expression instanceof BlockReferenceExpression) {
             return $this->analyzeBlockExpression($expression, $context);
@@ -639,40 +684,182 @@ final class ContextualEscapingAnalyzer
         }
         if ($expression instanceof FunctionExpression && 'include' === $expression->getAttribute('twig_callable')->getName()) {
             $arguments = $expression->getNode('arguments');
-            if (!$arguments->hasNode(0)) {
+            $template = $arguments->hasNode(0) ? $arguments->getNode(0) : ($arguments->hasNode('template') ? $arguments->getNode('template') : null);
+            if (null === $template) {
                 return $this->rejectCompositionNode($origin, $context);
             }
-            $ignoreMissing = $arguments->hasNode(3) && $arguments->getNode(3) instanceof ConstantExpression && true === $arguments->getNode(3)->getAttribute('value');
-            $module = $this->resolveTemplateExpression($arguments->getNode(0), $origin, $ignoreMissing);
+            $ignoreMissingNode = $arguments->hasNode(3) ? $arguments->getNode(3) : ($arguments->hasNode('ignore_missing') ? $arguments->getNode('ignore_missing') : null);
+            $ignoreMissing = $ignoreMissingNode instanceof ConstantExpression && true === $ignoreMissingNode->getAttribute('value');
+            $module = $this->resolveTemplateExpression($template, $origin, $ignoreMissing);
             if (null === $module) {
                 return $ignoreMissing ? $context : $context->toDead();
             }
 
-            return $this->analyzeModule($module, $context, $origin);
+            $contentTypes = $this->contentTypes;
+            $withContextNode = $arguments->hasNode(2) ? $arguments->getNode(2) : ($arguments->hasNode('with_context') ? $arguments->getNode('with_context') : null);
+            $withContext = !($withContextNode instanceof ConstantExpression) || false !== $withContextNode->getAttribute('value');
+            if ($arguments->hasNode(1)) {
+                $this->applyVariableContentTypes($arguments->getNode(1), !$withContext);
+            } elseif ($arguments->hasNode('variables')) {
+                $this->applyVariableContentTypes($arguments->getNode('variables'), !$withContext);
+            } elseif (!$withContext) {
+                $this->contentTypes = [];
+            }
+            $context = $this->analyzeModule($module, $context, $origin);
+            $this->contentTypes = $contentTypes;
+
+            return $context;
         }
 
         return $context;
     }
 
-    private function inferPlan(PrintNode $node, HtmlContext $context): ?EscapePlan
+    private function inferContentTypes(AbstractExpression $expression, HtmlContext $context): ContentTypeSet
+    {
+        if ($expression instanceof ContextVariable || $expression instanceof LocalVariable) {
+            return $this->contentTypes[$this->getVariableKey($expression)] ?? new ContentTypeSet([ContentType::PlainText]);
+        }
+
+        if ($this->isDirectCompositionExpression($expression)) {
+            $output = $this->analyzeCompositionExpression($expression, new HtmlContext(), $expression);
+            if (HtmlState::Dead === $output->getState()) {
+                return new ContentTypeSet([ContentType::PlainText]);
+            }
+            if (HtmlState::Text !== $output->getState()) {
+                $this->addDiagnostic($expression, DiagnosticCode::IncompleteStructuredOutput, \sprintf('The structured output ends in %s instead of HTML text.', $output->describe()));
+
+                return new ContentTypeSet([ContentType::PlainText]);
+            }
+
+            return new ContentTypeSet([ContentType::Html]);
+        }
+
+        if ($expression instanceof FilterExpression) {
+            /** @var AbstractExpression $input */
+            $input = $expression->getNode('node');
+            $inputTypes = $this->inferContentTypes($input, $context);
+            $filter = $expression->getAttribute('twig_callable');
+            if (!$filter instanceof TwigFilter) {
+                return new ContentTypeSet([ContentType::PlainText]);
+            }
+            if ($this->isAutomaticEscape($expression)) {
+                return $inputTypes;
+            }
+            if ('raw' === $filter->getName()) {
+                return new ContentTypeSet([ContentType::TrustedInnermost]);
+            }
+            if (\in_array($filter->getName(), ['e', 'escape'], true)) {
+                $arguments = $expression->getNode('arguments');
+                if (!\count($arguments)) {
+                    return new ContentTypeSet([ContentType::Html]);
+                }
+                $strategy = $arguments->getNode(0);
+                if (!$strategy instanceof ConstantExpression || !\is_string($strategy->getAttribute('value'))) {
+                    $this->addDiagnostic($expression, DiagnosticCode::MismatchedExplicitEscaping, 'A dynamic escaping strategy has no contextual content type.');
+
+                    return new ContentTypeSet([ContentType::PlainText]);
+                }
+
+                $contentTypes = $this->contentTypesForStrategies([$strategy->getAttribute('value')]);
+                if ($contentTypes->isPlainText()) {
+                    $this->addDiagnostic($expression, DiagnosticCode::MismatchedExplicitEscaping, \sprintf('The explicit "%s" escaping strategy has no contextual content type.', $strategy->getAttribute('value')));
+                }
+
+                return $contentTypes;
+            }
+
+            $safeTypes = $this->contentTypesForStrategies($filter->getSafe($expression->getNode('arguments')), false);
+            if (!$safeTypes->isPlainText()) {
+                return $safeTypes;
+            }
+            $preserved = $filter->getPreservesSafety();
+            if (\in_array('all', $preserved, true)) {
+                return $inputTypes;
+            }
+
+            return $inputTypes->intersect($this->contentTypesForStrategies($preserved, false));
+        }
+
+        if ($expression instanceof FunctionExpression) {
+            $function = $expression->getAttribute('twig_callable');
+
+            return $function instanceof TwigFunction ? $this->contentTypesForStrategies($function->getSafe($expression->getNode('arguments')), false) : new ContentTypeSet([ContentType::PlainText]);
+        }
+
+        if ($expression instanceof OperatorEscapeInterface) {
+            $contentTypes = null;
+            foreach ($expression->getOperandNamesToEscape() as $name) {
+                /** @var AbstractExpression $operand */
+                $operand = $expression->getNode($name);
+                $operandTypes = $this->inferContentTypes($operand, $context);
+                $contentTypes = null === $contentTypes ? $operandTypes : $contentTypes->intersect($operandTypes);
+            }
+
+            return $contentTypes ?? new ContentTypeSet([ContentType::PlainText]);
+        }
+
+        return new ContentTypeSet([ContentType::PlainText]);
+    }
+
+    /**
+     * @param list<string> $strategies
+     */
+    private function contentTypesForStrategies(array $strategies, bool $escaped = true): ContentTypeSet
+    {
+        $types = [];
+        foreach ($strategies as $strategy) {
+            $type = match ($strategy) {
+                'html' => ContentType::Html,
+                'html_attr', 'html_attr_relaxed' => ContentType::HtmlAttribute,
+                'js' => $escaped ? ContentType::JavaScriptString : ContentType::JavaScriptExpression,
+                'css' => $escaped ? ContentType::CssString : ContentType::Css,
+                'url' => ContentType::Url,
+                'srcset' => ContentType::Srcset,
+                default => null,
+            };
+            if (null !== $type && !\in_array($type, $types, true)) {
+                $types[] = $type;
+            }
+        }
+
+        return new ContentTypeSet($types ?: [ContentType::PlainText]);
+    }
+
+    private function inferPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes): ?EscapePlan
     {
         if ($context->getState()->isScriptData()) {
             return $this->rejectOutputContext($node, $context);
         }
 
         return match ($context->getState()) {
-            HtmlState::Text => new EscapePlan([EscapeOperation::HtmlText]),
-            HtmlState::Rcdata => new EscapePlan([EscapeOperation::HtmlRcdata]),
-            HtmlState::AttributeValueDoubleQuoted, HtmlState::AttributeValueSingleQuoted => $this->inferAttributePlan($node, $context, false),
-            HtmlState::AttributeValueUnquoted => $this->inferAttributePlan($node, $context, true),
+            HtmlState::Text => new EscapePlan($contentTypes->contains(ContentType::Html) || $contentTypes->contains(ContentType::TrustedInnermost) ? [] : [EscapeOperation::HtmlText]),
+            HtmlState::Rcdata => new EscapePlan($contentTypes->contains(ContentType::HtmlRcdata) || $contentTypes->contains(ContentType::TrustedInnermost) ? [] : [EscapeOperation::HtmlRcdata]),
+            HtmlState::AttributeValueDoubleQuoted, HtmlState::AttributeValueSingleQuoted => $this->inferAttributePlan($node, $context, $contentTypes, false),
+            HtmlState::AttributeValueUnquoted => $this->inferAttributePlan($node, $context, $contentTypes, true),
             HtmlState::Comment, HtmlState::CommentStart, HtmlState::CommentStartDash, HtmlState::CommentEndDash, HtmlState::CommentEnd, HtmlState::CommentEndBang => $this->rejectCommentInterpolation($node),
             HtmlState::RawText, HtmlState::Plaintext => $this->rejectOutputContext($node, $context),
             default => $this->rejectStructuralInterpolation($node, $context),
         };
     }
 
-    private function inferAttributePlan(PrintNode $node, HtmlContext $context, bool $unquoted): ?EscapePlan
+    private function inferAttributePlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
     {
+        $attributeContentType = $unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute;
+        $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
+        $outerPlan = $contentTypes->contains($attributeContentType) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted)) ? [] : [$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute];
+        $requiredContentType = match ($context->getAttributeType()) {
+            HtmlAttributeType::Url => ContentType::Url,
+            HtmlAttributeType::Srcset => ContentType::Srcset,
+            HtmlAttributeType::Html => ContentType::Html,
+            HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
+        };
+        if ($trustedInnermost && HtmlAttributeType::Plain === $context->getAttributeType()) {
+            return new EscapePlan([]);
+        }
+        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Url, HtmlAttributeType::Srcset, HtmlAttributeType::Style, HtmlAttributeType::JavaScript, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
+            return new EscapePlan($outerPlan);
+        }
+
         $analysis = match ($context->getAttributeType()) {
             HtmlAttributeType::Url => 'URL',
             HtmlAttributeType::Srcset => 'srcset',
@@ -689,29 +876,40 @@ final class ContextualEscapingAnalyzer
             return null;
         }
 
-        return new EscapePlan([$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute]);
+        return new EscapePlan($outerPlan);
     }
 
     private function analyzeIf(IfNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
         $branches = [];
+        $contentTypeBranches = [];
+        $inputContentTypes = $this->contentTypes;
         $tests = $node->getNode('tests');
         for ($i = 1; $i < \count($tests); $i += 2) {
+            $this->contentTypes = $inputContentTypes;
             if ($tests->hasNode((string) $i)) {
                 $branches[] = $this->analyzeNode($tests->getNode((string) $i), $context, $explicitAutoescape);
             } else {
                 $branches[] = $context;
             }
+            $contentTypeBranches[] = $this->contentTypes;
         }
+        $this->contentTypes = $inputContentTypes;
         $branches[] = $node->hasNode('else') ? $this->analyzeNode($node->getNode('else'), $context, $explicitAutoescape) : $context;
+        $contentTypeBranches[] = $this->contentTypes;
+        $this->contentTypes = $this->joinContentTypeMaps($contentTypeBranches);
 
         return $this->joinContexts($branches, $node, 'The branches of this "if" tag end in incompatible contexts');
     }
 
     private function analyzeFor(ForNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
+        $inputContentTypes = $this->contentTypes;
         $bodyContext = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
+        $bodyContentTypes = $this->contentTypes;
         if (HtmlState::Dead === $bodyContext->getState()) {
+            $this->contentTypes = $inputContentTypes;
+
             return $bodyContext;
         }
 
@@ -719,38 +917,167 @@ final class ContextualEscapingAnalyzer
         $output = $bodyContext->nudgeAttributeValue();
         if (!$input->equals($output)) {
             $this->addDiagnostic($node, DiagnosticCode::UnstableLoop, \sprintf('The "for" loop body changes the HTML context from %s to %s, so repeated iterations cannot be analyzed safely.', $input->describe(), $output->describe()));
+            $this->contentTypes = $inputContentTypes;
 
             return $context->toDead();
         }
 
         if (!$node->hasNode('else')) {
+            $this->contentTypes = $this->joinContentTypeMaps([$bodyContentTypes, $inputContentTypes]);
+
             return $output;
         }
 
+        $this->contentTypes = $inputContentTypes;
         $elseContext = $this->analyzeNode($node->getNode('else'), $context, $explicitAutoescape);
+        $this->contentTypes = $this->joinContentTypeMaps([$bodyContentTypes, $this->contentTypes]);
 
         return $this->joinContexts([$output, $elseContext], $node, 'The body and "else" branch of this "for" tag end in incompatible contexts');
     }
 
-    private function analyzeAutoEscape(AutoEscapeNode $node, HtmlContext $context): HtmlContext
+    private function analyzeWith(WithNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
-        $strategy = $node->getAttribute('value');
-        if (false === $strategy) {
-            $this->addDiagnostic($node, DiagnosticCode::DisabledAutoescaping, 'Disabling autoescaping cannot be verified until typed safe content is implemented.');
+        $contentTypes = $this->contentTypes;
+        if ($node->hasNode('variables')) {
+            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
+        } elseif ($node->getAttribute('only')) {
+            $this->contentTypes = [];
         }
-
-        $bodyContext = $this->analyzeNode($node->getNode('body'), $context, $strategy);
-
-        return false === $strategy ? $bodyContext->toDead() : $bodyContext;
-    }
-
-    private function analyzeSet(SetNode $node, HtmlContext $context): HtmlContext
-    {
-        if ($node->getAttribute('capture') || $node->getAttribute('safe')) {
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Captured output is not supported until typed safe content is implemented.');
-        }
+        $context = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
+        $this->contentTypes = $contentTypes;
 
         return $context;
+    }
+
+    private function applyVariableContentTypes(Node $variables, bool $only = false): void
+    {
+        if (!$variables instanceof ArrayExpression) {
+            if ($only) {
+                $this->contentTypes = [];
+            }
+
+            return;
+        }
+        $inputContentTypes = $this->contentTypes;
+        $outputContentTypes = $only ? [] : $inputContentTypes;
+        for ($i = 0; $i < \count($variables); $i += 2) {
+            $name = $variables->getNode($i);
+            $value = $variables->getNode(1 + $i);
+            if (!$name instanceof ConstantExpression || !\is_string($name->getAttribute('value')) || !$value instanceof AbstractExpression) {
+                continue;
+            }
+            $key = 'context:'.$name->getAttribute('value');
+            $this->contentTypes = $inputContentTypes;
+            $valueContentTypes = $this->inferContentTypes($value, new HtmlContext());
+            if ($valueContentTypes->isPlainText()) {
+                unset($outputContentTypes[$key]);
+            } else {
+                $outputContentTypes[$key] = $valueContentTypes;
+            }
+        }
+        $this->contentTypes = $outputContentTypes;
+    }
+
+    private function analyzeAutoEscape(AutoEscapeNode $node, HtmlContext $context): HtmlContext
+    {
+        return $this->analyzeNode($node->getNode('body'), $context, $node->getAttribute('value'));
+    }
+
+    private function analyzeSet(SetNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
+    {
+        $names = $node->getNode('names');
+        $values = $node->getNode('values');
+        if ($values instanceof CaptureNode) {
+            $contentTypes = $this->analyzeCapturedContent($values, $explicitAutoescape);
+            $this->assignContentTypes($names, [$contentTypes]);
+
+            return $context;
+        }
+        if ($node->getAttribute('safe')) {
+            $contentTypes = new ContentTypeSet([ContentType::Html]);
+            if ($values instanceof ConstantExpression && \is_string($values->getAttribute('value'))) {
+                $output = $this->contextParser->consume(new HtmlContext(), $values->getAttribute('value'));
+                if (HtmlState::Text !== $output->getState()) {
+                    $this->addDiagnostic($node, DiagnosticCode::IncompleteStructuredOutput, \sprintf('The captured output ends in %s instead of HTML text.', $output->describe()));
+                    $contentTypes = new ContentTypeSet([ContentType::PlainText]);
+                }
+            }
+            $this->assignContentTypes($names, [$contentTypes]);
+
+            return $context;
+        }
+
+        $valueContentTypes = [];
+        foreach ($values as $value) {
+            $valueContentTypes[] = $value instanceof AbstractExpression ? $this->inferContentTypes($value, new HtmlContext()) : new ContentTypeSet([ContentType::PlainText]);
+        }
+        $this->assignContentTypes($names, $valueContentTypes);
+
+        return $context;
+    }
+
+    private function analyzeCapturedContent(CaptureNode $capture, string|bool|null $explicitAutoescape): ContentTypeSet
+    {
+        $output = $this->analyzeNode($capture->getNode('body'), new HtmlContext(), $explicitAutoescape);
+        if (HtmlState::Dead === $output->getState()) {
+            return new ContentTypeSet([ContentType::PlainText]);
+        }
+        if (HtmlState::Text !== $output->getState()) {
+            $this->addDiagnostic($capture, DiagnosticCode::IncompleteStructuredOutput, \sprintf('The captured output ends in %s instead of HTML text.', $output->describe()));
+
+            return new ContentTypeSet([ContentType::PlainText]);
+        }
+
+        return new ContentTypeSet([ContentType::Html]);
+    }
+
+    /**
+     * @param list<ContentTypeSet> $contentTypes
+     */
+    private function assignContentTypes(Node $names, array $contentTypes): void
+    {
+        if (!$names instanceof Nodes) {
+            $names = new Nodes([$names]);
+        }
+        foreach ($names as $index => $name) {
+            if (!$name instanceof ContextVariable && !$name instanceof LocalVariable) {
+                continue;
+            }
+            $key = $this->getVariableKey($name);
+            $type = $contentTypes[$index] ?? new ContentTypeSet([ContentType::PlainText]);
+            if ($type->isPlainText()) {
+                unset($this->contentTypes[$key]);
+            } else {
+                $this->contentTypes[$key] = $type;
+            }
+        }
+    }
+
+    private function getVariableKey(ContextVariable|LocalVariable $variable): string
+    {
+        return $variable instanceof LocalVariable ? 'local:'.spl_object_id($variable) : 'context:'.$variable->getAttribute('name');
+    }
+
+    /**
+     * @param list<array<string, ContentTypeSet>> $maps
+     *
+     * @return array<string, ContentTypeSet>
+     */
+    private function joinContentTypeMaps(array $maps): array
+    {
+        $joined = $maps[0];
+        foreach ($joined as $name => $contentTypes) {
+            foreach (\array_slice($maps, 1) as $map) {
+                $contentTypes = $contentTypes->intersect($map[$name] ?? new ContentTypeSet([ContentType::PlainText]));
+            }
+            if ($contentTypes->isPlainText()) {
+                unset($joined[$name]);
+            } else {
+                $joined[$name] = $contentTypes;
+            }
+        }
+
+        return $joined;
     }
 
     /**
@@ -826,100 +1153,11 @@ final class ContextualEscapingAnalyzer
         };
     }
 
-    private function containsRawFilter(Node $node): bool
-    {
-        if ($node instanceof FilterExpression && 'raw' === $node->getAttribute('twig_callable')->getName()) {
-            return true;
-        }
-
-        foreach ($node as $child) {
-            if ($this->containsRawFilter($child)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function containsUnsupportedComposition(Node $node): bool
-    {
-        if ($node instanceof BlockReferenceExpression || $node instanceof MacroReferenceExpression || $node instanceof ParentExpression) {
-            return true;
-        }
-        if ($node instanceof FunctionExpression && 'include' === $node->getAttribute('twig_callable')->getName()) {
-            return true;
-        }
-
-        foreach ($node as $child) {
-            if ($this->containsUnsupportedComposition($child)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @return list<array{string|null, int}>
-     */
-    private function findExplicitEscapingStrategies(Node $node): array
-    {
-        if ($node instanceof FilterExpression) {
-            if (!\in_array($node->getAttribute('twig_callable')->getName(), ['e', 'escape'], true)) {
-                return [];
-            }
-            if ($this->isAutomaticEscape($node)) {
-                return $this->findExplicitEscapingStrategies($node->getNode('node'));
-            }
-
-            $arguments = $node->getNode('arguments');
-            if (!\count($arguments)) {
-                $strategy = 'html';
-            } else {
-                $first = $arguments->getNode(0);
-                $strategy = $first instanceof ConstantExpression && \is_string($first->getAttribute('value')) ? $first->getAttribute('value') : null;
-            }
-
-            return [[$strategy, $node->getTemplateLine()]];
-        }
-
-        if (!$node instanceof OperatorEscapeInterface) {
-            return [];
-        }
-
-        $strategies = [];
-        foreach ($node->getOperandNamesToEscape() as $name) {
-            array_push($strategies, ...$this->findExplicitEscapingStrategies($node->getNode($name)));
-        }
-
-        return $strategies;
-    }
-
     private function isAutomaticEscape(FilterExpression $node): bool
     {
         $arguments = $node->getNode('arguments');
 
         return $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value');
-    }
-
-    private function describePlan(EscapePlan $plan): string
-    {
-        return match ($plan->getOperations()) {
-            [EscapeOperation::HtmlText] => 'HTML text',
-            [EscapeOperation::HtmlRcdata] => 'HTML RCDATA',
-            [EscapeOperation::HtmlAttribute] => 'quoted HTML attribute',
-            [EscapeOperation::HtmlAttributeUnquoted] => 'unquoted HTML attribute',
-            default => 'unknown',
-        };
-    }
-
-    private function isExplicitStrategyCompatible(EscapePlan $plan, ?string $strategy): bool
-    {
-        return match ($plan->getOperations()) {
-            [EscapeOperation::HtmlText], [EscapeOperation::HtmlRcdata] => 'html' === $strategy,
-            [EscapeOperation::HtmlAttribute] => 'html_attr' === $strategy,
-            default => false,
-        };
     }
 
     private function collectModuleIndependentDiagnostics(ModuleNode $module): void
@@ -969,12 +1207,6 @@ final class ContextualEscapingAnalyzer
                 if ($expression->isGenerator()) {
                     $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, 'Generator output is not supported by experimental contextual escaping analysis.');
                 }
-                if ($this->containsRawFilter($expression)) {
-                    $this->addDiagnostic($node, DiagnosticCode::RawOutput, 'The "raw" filter cannot be verified until typed safe content is implemented.');
-                }
-                if (!$this->isDirectCompositionExpression($expression) && $this->containsUnsupportedComposition($expression)) {
-                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Nested template, block, parent block, and macro results are not supported by experimental contextual escaping analysis.');
-                }
 
                 return;
 
@@ -1005,30 +1237,15 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case WithNode::class:
-                if ($node->hasNode('variables')) {
-                    $this->collectCompositionDiagnostic($node->getNode('variables'));
-                }
-                $this->collectIndependentDiagnostics($node->getNode('body'));
-
-                return;
-
             case AutoEscapeNode::class:
-                if (false === $node->getAttribute('value')) {
-                    $this->addDiagnostic($node, DiagnosticCode::DisabledAutoescaping, 'Disabling autoescaping cannot be verified until typed safe content is implemented.');
-                }
                 $this->collectIndependentDiagnostics($node->getNode('body'));
 
                 return;
 
             case SetNode::class:
-                if ($node->getAttribute('capture') || $node->getAttribute('safe')) {
-                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Captured output is not supported until typed safe content is implemented.');
-                    $values = $node->getNode('values');
-                    if ($values instanceof CaptureNode && $values->hasNode('body')) {
-                        $this->collectIndependentDiagnostics($values->getNode('body'));
-                    }
-                } elseif ($node->hasNode('values')) {
-                    $this->collectCompositionDiagnostic($node->getNode('values'));
+                $values = $node->getNode('values');
+                if ($values instanceof CaptureNode && $values->hasNode('body')) {
+                    $this->collectIndependentDiagnostics($values->getNode('body'));
                 }
 
                 return;
@@ -1038,7 +1255,6 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case CaptureNode::class:
-                $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Captured output is not supported until typed safe content is implemented.');
                 if ($node->hasNode('body')) {
                     $this->collectIndependentDiagnostics($node->getNode('body'));
                 }
@@ -1065,13 +1281,6 @@ final class ContextualEscapingAnalyzer
 
             default:
                 $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
-        }
-    }
-
-    private function collectCompositionDiagnostic(Node $node): void
-    {
-        if ($this->containsUnsupportedComposition($node)) {
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Template, block, parent block, and macro results are not supported by experimental contextual escaping analysis.');
         }
     }
 

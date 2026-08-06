@@ -27,6 +27,7 @@ use Twig\Source;
 use Twig\Token;
 use Twig\TokenParser\AbstractTokenParser;
 use Twig\TwigFilter;
+use Twig\TwigFunction;
 
 class ContextualEscapingLinterTest extends TestCase
 {
@@ -120,7 +121,9 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'srcset' => ['<img srcset="{{ value }}">'];
         yield 'link image srcset' => ['<link imagesrcset="{{ value }}">'];
         yield 'style' => ['<div style="{{ value }}">'];
+        yield 'escaped CSS string' => ['<div style="{{ value|e("css") }}">'];
         yield 'event handler' => ['<button onclick="{{ value }}">'];
+        yield 'escaped JavaScript string' => ['<button onclick="{{ value|e("js") }}">'];
         yield 'embedded HTML' => ['<iframe srcdoc="{{ value }}"></iframe>'];
         yield 'meta refresh content' => ['<meta http-equiv="refresh" content="{{ value }}">'];
     }
@@ -241,32 +244,37 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
     }
 
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
     #[DataProvider('provideRawExpressions')]
-    public function testRejectsRawOutput(string $template): void
+    public function testTreatsRawAsTrustForTheInnermostContentType(string $template, array $expectedPlans): void
     {
         $result = $this->lint($template);
 
-        $this->assertSame([DiagnosticCode::RawOutput], $this->getDiagnosticCodes($result));
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
     }
 
     public static function provideRawExpressions(): iterable
     {
-        yield 'direct raw filter' => ['{{ value|raw }}'];
-        yield 'nested raw filter' => ['{{ condition ? value|raw : other }}'];
+        yield 'HTML fragment' => ['{{ value|raw }}', [[]]];
+        yield 'RCDATA' => ['<title>{{ value|raw }}</title>', [[]]];
+        yield 'quoted attribute' => ['<div title="{{ value|raw }}">', [[]]];
+        yield 'conditional operand' => ['{{ condition ? value|raw : other }}', [[EscapeOperation::HtmlText]]];
+        yield 'URL with enclosing attribute' => ['<a href="{{ value|raw }}">', [[EscapeOperation::HtmlAttribute]]];
+        yield 'unquoted URL with enclosing attribute' => ['<a href={{ value|raw }}>', [[EscapeOperation::HtmlAttributeUnquoted]]];
+        yield 'JavaScript with enclosing attribute' => ['<button onclick="{{ value|raw }}">', [[EscapeOperation::HtmlAttribute]]];
+        yield 'CSS with enclosing attribute' => ['<div style="{{ value|raw }}">', [[EscapeOperation::HtmlAttribute]]];
+        yield 'HTML with enclosing attribute' => ['<iframe srcdoc="{{ value|raw }}"></iframe>', [[EscapeOperation::HtmlAttribute]]];
     }
 
-    public function testCollectsEveryIndependentRawDiagnostic(): void
-    {
-        $result = $this->lint('{{ first|raw }}{{ second|raw }}');
-
-        $this->assertSame([DiagnosticCode::RawOutput, DiagnosticCode::RawOutput], $this->getDiagnosticCodes($result));
-    }
-
-    public function testRejectsDisabledAutoescaping(): void
+    public function testContextualEscapingStillAppliesWhenLegacyAutoescapingIsDisabled(): void
     {
         $result = $this->lint('{% autoescape false %}{{ value }}{% endautoescape %}');
 
-        $this->assertSame([DiagnosticCode::DisabledAutoescaping], $this->getDiagnosticCodes($result));
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
     }
 
     public function testRejectsGeneratorOutput(): void
@@ -280,12 +288,16 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
 
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
     #[DataProvider('provideMatchingExplicitEscapes')]
-    public function testAcceptsMatchingExplicitEscaping(string $template): void
+    public function testAcceptsMatchingExplicitEscaping(string $template, array $expectedPlans): void
     {
         $result = $this->lint($template);
 
         $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
     }
 
     public function testIgnoresArgumentsOfNonEscapingFilters(): void
@@ -300,29 +312,152 @@ class ContextualEscapingLinterTest extends TestCase
 
     public static function provideMatchingExplicitEscapes(): iterable
     {
-        yield 'HTML text' => ['{{ value|e("html") }}'];
-        yield 'default escape strategy' => ['{{ value|e }}'];
-        yield 'HTML attribute' => ['<div title="{{ value|e("html_attr") }}">'];
-        yield 'HTML attribute autoescape block' => ['{% autoescape "html_attr" %}<div title="{{ value }}">{% endautoescape %}'];
-        yield 'escape used as a function argument' => ['{{ max(value|e("js"), "fallback") }}'];
+        yield 'HTML text' => ['{{ value|e("html") }}', [[]]];
+        yield 'default escape strategy' => ['{{ value|e }}', [[]]];
+        yield 'HTML attribute' => ['<div title="{{ value|e("html_attr") }}">', [[]]];
+        yield 'HTML attribute autoescape block' => ['{% autoescape "html_attr" %}<div title="{{ value }}">{% endautoescape %}', [[]]];
+        yield 'escape used as a function argument' => ['{{ max(value|e("js"), "fallback") }}', [[EscapeOperation::HtmlText]]];
     }
 
-    #[DataProvider('provideMismatchedExplicitEscapes')]
-    public function testRejectsMismatchedExplicitEscaping(string $template): void
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideTypedIntermediateEscapes')]
+    public function testAppliesOuterEscapingToTypedIntermediateContent(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideTypedIntermediateEscapes(): iterable
+    {
+        yield 'HTML in quoted attribute' => ['<div title="{{ value|e("html") }}">', [[EscapeOperation::HtmlAttribute]]];
+        yield 'quoted attribute content in unquoted attribute' => ['<div title={{ value|e("html_attr") }}>', [[EscapeOperation::HtmlAttributeUnquoted]]];
+        yield 'quoted autoescape in unquoted attribute' => ['{% autoescape "html_attr" %}<div title={{ value }}>{% endautoescape %}', [[EscapeOperation::HtmlAttributeUnquoted]]];
+        yield 'conditional operand' => ['{{ condition ? value|e("js") : other }}', [[EscapeOperation::HtmlText]]];
+        yield 'HTML autoescape in quoted attribute' => ['{% autoescape "html" %}<div title="{{ value }}">{% endautoescape %}', [[EscapeOperation::HtmlAttribute]]];
+        yield 'URL in quoted attribute' => ['<a href="{{ value|e("url") }}">', [[EscapeOperation::HtmlAttribute]]];
+    }
+
+    #[DataProvider('provideUnknownExplicitEscapingStrategies')]
+    public function testRejectsAnUnknownExplicitEscapingStrategy(string $template): void
     {
         $result = $this->lint($template);
 
         $this->assertSame([DiagnosticCode::MismatchedExplicitEscaping], $this->getDiagnosticCodes($result));
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
     }
 
-    public static function provideMismatchedExplicitEscapes(): iterable
+    public static function provideUnknownExplicitEscapingStrategies(): iterable
     {
-        yield 'wrong attribute strategy' => ['<div title="{{ value|e("html") }}">'];
-        yield 'quoted strategy in an unquoted attribute' => ['<div title={{ value|e("html_attr") }}>'];
-        yield 'quoted autoescape strategy in an unquoted attribute' => ['{% autoescape "html_attr" %}<div title={{ value }}>{% endautoescape %}'];
-        yield 'dynamic strategy' => ['{{ value|e(strategy) }}'];
-        yield 'conditional operand' => ['{{ condition ? value|e("js") : other }}'];
-        yield 'autoescape block' => ['{% autoescape "html" %}<div title="{{ value }}">{% endautoescape %}'];
+        yield 'dynamic' => ['{{ value|e(strategy) }}'];
+        yield 'custom' => ['{{ value|e("custom") }}'];
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideCapturedContent')]
+    public function testPreservesProvenCapturedContentTypes(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideCapturedContent(): iterable
+    {
+        yield 'HTML fragment' => [
+            '{% set content %}<b>{{ value }}</b>{% endset %}{{ content }}',
+            [[EscapeOperation::HtmlText], []],
+        ];
+        yield 'HTML fragment in an attribute' => [
+            '{% set content %}<b>{{ value }}</b>{% endset %}<div title="{{ content }}">',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'apply loses the HTML type' => [
+            '{% apply upper %}<b>{{ value }}</b>{% endapply %}',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'matching captures in every branch' => [
+            '{% if condition %}{% set content %}<b>{{ first }}</b>{% endset %}{% else %}{% set content %}<i>{{ second }}</i>{% endset %}{% endif %}{{ content }}',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText], []],
+        ];
+        yield 'capture in only one branch' => [
+            '{% if condition %}{% set content %}<b>{{ value }}</b>{% endset %}{% endif %}{{ content }}',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideIncompleteCapturedContent')]
+    public function testRejectsIncompleteCapturedContent(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([DiagnosticCode::IncompleteStructuredOutput], $this->getDiagnosticCodes($result));
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideIncompleteCapturedContent(): iterable
+    {
+        yield 'optimized static capture' => [
+            '{% set content %}<div title="{% endset %}{{ content }}',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'dynamic capture' => [
+            '{% set content %}<div title="{{ value }}{% endset %}{{ content }}',
+            [[EscapeOperation::HtmlAttribute], [EscapeOperation::HtmlText]],
+        ];
+    }
+
+    public function testUsesExactCallableSafeContentTypes(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_html', static fn () => '', ['is_safe' => ['html']]));
+        $environment->addFunction(new TwigFunction('safe_url', static fn () => '', ['is_safe' => ['url']]));
+        $environment->addFunction(new TwigFunction('safe_all', static fn () => '', ['is_safe' => ['all']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('{{ safe_html() }}<div title="{{ safe_html() }}"><a href="{{ safe_url() }}">{{ safe_all() }}', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [],
+            [EscapeOperation::HtmlAttribute],
+            [EscapeOperation::HtmlAttribute],
+            [EscapeOperation::HtmlText],
+        ], $this->getPlans($result));
+    }
+
+    public function testDefersSafeLanguageContentUntilLexicalAnalysis(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_js', static fn () => '', ['is_safe' => ['js']]));
+        $environment->addFunction(new TwigFunction('safe_css', static fn () => '', ['is_safe' => ['css']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<button onclick="{{ safe_js() }}"><div style="{{ safe_css() }}">', 'index.html.twig'));
+
+        $this->assertSame([
+            DiagnosticCode::UnsupportedAttributeContext,
+            DiagnosticCode::UnsupportedAttributeContext,
+        ], $this->getDiagnosticCodes($result));
+        $this->assertSame([], $result->getInferredEscapes());
+    }
+
+    public function testPreservesDeclaredFilterContentTypes(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFilter(new TwigFilter('preserve_html', static fn ($value) => $value, ['preserves_safety' => ['html']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% set content %}<b>{{ value }}</b>{% endset %}{{ content|preserve_html }}', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText], []], $this->getPlans($result));
     }
 
     /**
@@ -349,6 +484,11 @@ class ContextualEscapingLinterTest extends TestCase
             ['index.html.twig' => '{{ block("content") }}{% block content %}{{ value }}{% endblock %}'],
             'index.html.twig',
             [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'missing optional block' => [
+            ['index.html.twig' => '{{ block("missing") ?? "fallback" }}'],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
         ];
         yield 'inheritance' => [
             [
@@ -392,6 +532,14 @@ class ContextualEscapingLinterTest extends TestCase
             'index.html.twig',
             [[EscapeOperation::HtmlAttribute]],
         ];
+        yield 'typed include variable' => [
+            [
+                'index.html.twig' => '{% set content %}<b>{{ value }}</b>{% endset %}{% include "partial.html.twig" with {content: content} only %}',
+                'partial.html.twig' => '{{ content }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
+        ];
         yield 'include function' => [
             [
                 'index.html.twig' => '{{ include("partial.html.twig") }}',
@@ -399,6 +547,38 @@ class ContextualEscapingLinterTest extends TestCase
             ],
             'index.html.twig',
             [[EscapeOperation::HtmlText]],
+        ];
+        yield 'transformed include function' => [
+            [
+                'index.html.twig' => '{{ include("partial.html.twig")|upper }}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'trusted include function' => [
+            [
+                'index.html.twig' => '{{ include("partial.html.twig")|raw }}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
+        ];
+        yield 'assigned include function' => [
+            [
+                'index.html.twig' => '{% set content = include("partial.html.twig") %}{{ content }}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
+        ];
+        yield 'include function in a with expression' => [
+            [
+                'index.html.twig' => '{% with {content: include("partial.html.twig")} %}{{ content }}{% endwith %}',
+                'partial.html.twig' => '{{ value }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
         ];
         yield 'include fallback list' => [
             [
@@ -419,6 +599,34 @@ class ContextualEscapingLinterTest extends TestCase
             ],
             'index.html.twig',
             [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'transformed self macro' => [
+            [
+                'index.html.twig' => '{% macro value() %}{{ value }}{% endmacro %}{{ _self.value()|upper }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'assigned self macro' => [
+            [
+                'index.html.twig' => '{% macro value() %}{{ value }}{% endmacro %}{% set content = _self.value() %}{{ content }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
+        ];
+        yield 'context-stable recursive macro' => [
+            [
+                'index.html.twig' => '{% macro tree(item) %}{{ item.name }}{% if item.children %}{{ _self.tree(item.children) }}{% endif %}{% endmacro %}{{ _self.tree(tree) }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'typed macro argument' => [
+            [
+                'index.html.twig' => '{% macro wrapper(content) %}<div>{{ content }}</div>{% endmacro %}{% set content %}<b>{{ value }}</b>{% endset %}{{ _self.wrapper(content) }}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], []],
         ];
         yield 'imported macro' => [
             [
@@ -504,38 +712,11 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'include tag' => ['{% include "other.html.twig" %}'];
         yield 'include function' => ['{{ include("other.html.twig") }}'];
         yield 'include function in an assignment' => ['{% set content = include("other.html.twig") %}'];
-        yield 'include function in a with expression' => ['{% with {content: include("other.html.twig")} %}content{% endwith %}'];
         yield 'import' => ['{% import "macros.html.twig" as macros %}'];
         yield 'from import' => ['{% from "macros.html.twig" import input %}'];
         yield 'inheritance' => ['{% extends "base.html.twig" %}'];
         yield 'parent function' => ['{% extends "base.html.twig" %}{% block content %}{{ parent() }}{% endblock %}'];
-        yield 'capture' => ['{% set content %}content{% endset %}'];
         yield 'embed' => ['{% embed "base.html.twig" %}{% endembed %}'];
-    }
-
-    /**
-     * @param list<DiagnosticCode> $expectedCodes
-     */
-    #[DataProvider('provideUnsupportedCompositionContainingRawOutput')]
-    public function testCollectsIndependentDiagnosticsInsideUnsupportedComposition(string $template, array $expectedCodes): void
-    {
-        $result = $this->lint($template);
-
-        $this->assertSame($expectedCodes, $this->getDiagnosticCodes($result));
-    }
-
-    public static function provideUnsupportedCompositionContainingRawOutput(): iterable
-    {
-        yield 'capture' => [
-            '{% set content %}{{ value|raw }}{% endset %}',
-            [DiagnosticCode::UnsupportedTemplateComposition, DiagnosticCode::RawOutput],
-        ];
-        yield 'block' => ['{% block content %}{{ value|raw }}{% endblock %}', [DiagnosticCode::RawOutput]];
-        yield 'macro' => ['{% macro content() %}{{ value|raw }}{% endmacro %}', [DiagnosticCode::RawOutput]];
-        yield 'embed' => [
-            '{% embed "base.html.twig" %}{% block content %}{{ value|raw }}{% endblock %}{% endembed %}',
-            [DiagnosticCode::RawOutput, DiagnosticCode::UnsupportedTemplateComposition],
-        ];
     }
 
     public function testRejectsAnUnknownStatementNodeEvenWithoutAnOutputMarker(): void

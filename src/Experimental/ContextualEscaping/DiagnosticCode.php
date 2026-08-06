@@ -20,10 +20,9 @@ enum DiagnosticCode
 {
     case AmbiguousControlFlow;
     case CommentInterpolation;
-    case DisabledAutoescaping;
     case IncompleteHtmlContext;
+    case IncompleteStructuredOutput;
     case MismatchedExplicitEscaping;
-    case RawOutput;
     case UnstableLoop;
     case UnsupportedAttributeContext;
     case UnsupportedNode;

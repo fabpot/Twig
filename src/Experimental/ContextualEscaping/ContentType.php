@@ -1,0 +1,33 @@
+<?php
+
+/*
+ * This file is part of Twig.
+ *
+ * (c) Fabien Potencier
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace Twig\Experimental\ContextualEscaping;
+
+/**
+ * @internal
+ *
+ * @experimental
+ */
+enum ContentType
+{
+    case PlainText;
+    case TrustedInnermost;
+    case Html;
+    case HtmlAttribute;
+    case HtmlAttributeUnquoted;
+    case HtmlRcdata;
+    case JavaScriptExpression;
+    case JavaScriptString;
+    case Css;
+    case CssString;
+    case Url;
+    case Srcset;
+}
