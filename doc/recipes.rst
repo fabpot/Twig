@@ -74,28 +74,14 @@ Create the linter from your application's configured Twig environment. Using
 that environment is important because the parser needs the same extensions,
 loaders, functions, filters and tests as the application::
 
-    use Twig\Error\Error;
     use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
 
     $twig = create_your_twig_env();
     $linter = ContextualEscapingLinter::create($twig);
-
-    $templateNames = [
-        'base.html.twig',
-        'account/profile.html.twig',
-    ];
+    $results = $linter->lintDirectory(__DIR__.'/templates');
     $hasErrors = false;
 
-    foreach ($templateNames as $name) {
-        try {
-            $result = $linter->lintTemplate($name);
-        } catch (Error $error) {
-            fprintf(STDERR, "%s\n", $error->getMessage());
-            $hasErrors = true;
-
-            continue;
-        }
-
+    foreach ($results as $name => $result) {
         foreach ($result->getDiagnostics() as $diagnostic) {
             fprintf(
                 STDERR,
@@ -111,20 +97,30 @@ loaders, functions, filters and tests as the application::
 
     exit($hasErrors ? 1 : 0);
 
-Template names must be loader names rather than arbitrary filesystem paths.
-This lets the linter resolve static inheritance, includes, imports and macros
-through the configured loader. Twig loaders cannot enumerate their templates,
-so the application or framework integration must provide the template names.
+``lintDirectory()`` recursively analyzes files ending in ``.html.twig`` and
+returns an iterable keyed by their logical loader names. The directory must be
+a loader root so that relative names resolve static inheritance, includes,
+imports and macros through the configured loader. Syntax errors are returned
+as ``SyntaxError`` diagnostics, allowing the remaining files to be analyzed.
 
-By default, the linter skips templates whose names do not end in
-``.html.twig``. Pass ``true`` as the second argument to analyze another
-filename::
+Pass a loader namespace as the second argument when auditing a namespaced
+loader root::
 
-    $result = $linter->lintTemplate('email.twig', true);
+    $results = $linter->lintDirectory(__DIR__.'/admin', 'admin');
 
-You can also analyze a :class:`Twig\\Source` directly with the ``lint()``
-method. This is useful when project-specific template discovery already
-provides both the logical loader name and the source code.
+The optional third argument selects and forces analysis of another filename
+suffix::
+
+    $results = $linter->lintDirectory(
+        __DIR__.'/emails',
+        extension: '.twig',
+    );
+
+Twig loaders cannot enumerate arbitrary database or custom loader contents. In
+those cases, the application or framework integration must provide logical
+loader names to ``lintTemplate()``. You can also analyze a
+:class:`Twig\\Source` directly with ``lint()`` when project-specific discovery
+already provides both the logical name and source code.
 
 .. caution::
 
