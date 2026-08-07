@@ -23,6 +23,7 @@ use Twig\Experimental\ContextualEscaping\EnvironmentTemplateResolver;
 use Twig\Experimental\ContextualEscaping\EscapeOperation;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
+use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
 use Twig\Loader\ArrayLoader;
 use Twig\Node\Node;
 use Twig\Source;
@@ -118,7 +119,6 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'srcset' => ['<img srcset="{{ value }}">'];
         yield 'link image srcset' => ['<link imagesrcset="{{ value }}">'];
         yield 'embedded HTML' => ['<iframe srcdoc="{{ value }}"></iframe>'];
-        yield 'meta refresh content' => ['<meta http-equiv="refresh" content="{{ value }}">'];
     }
 
     /**
@@ -219,13 +219,14 @@ class ContextualEscapingLinterTest extends TestCase
         $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
         $environment->addFunction(new TwigFunction('safe_url', static fn () => '', ['is_safe' => ['url']]));
 
-        $result = $this->createLinter($environment)->lint(new Source('<a href="{{ safe_url() }}"><a href="/prefix/{{ safe_url() }}"><a href="?next={{ safe_url() }}">', 'index.html.twig'));
+        $result = $this->createLinter($environment)->lint(new Source('<a href="{{ safe_url() }}"><a href="/prefix/{{ safe_url() }}"><a href="?next={{ safe_url() }}"><meta http-equiv="refresh" content="0;url={{ safe_url() }}">', 'index.html.twig'));
 
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([
             [EscapeOperation::HtmlAttribute],
             [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
             [EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute],
+            [EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
         ], $this->getPlans($result));
     }
 
@@ -253,6 +254,184 @@ class ContextualEscapingLinterTest extends TestCase
         $result = $this->lint('<a href="&quest;query={{ value }}">');
 
         $this->assertSame([DiagnosticCode::AmbiguousUrlContext], $this->getDiagnosticCodes($result));
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideMetaContentContexts')]
+    public function testInfersPlansForMetaContentContexts(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideMetaContentContexts(): iterable
+    {
+        yield 'named metadata' => [
+            '<meta name="description" content="{{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'property metadata' => [
+            '<meta property="og:title" content="{{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'content before its discriminator' => [
+            '<meta content="{{ value }}" name="description">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'content before another pragma' => [
+            '<meta content="{{ value }}" http-equiv="content-type">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'another pragma' => [
+            '<meta http-equiv="content-security-policy" content="{{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'first duplicate http-equiv wins' => [
+            '<meta http-equiv="content-type" http-equiv="refresh" content="{{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'duplicate content is plain' => [
+            '<meta content="static" content="{{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'trusted ordinary metadata' => [
+            '<meta name="description" content="{{ value|raw }}">',
+            [[]],
+        ];
+        yield 'dynamic refresh delay' => [
+            '<meta HTTP-EQUIV="Refresh" content="{{ value }}">',
+            [[EscapeOperation::MetaRefreshDelay, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'dynamic delay suffix' => [
+            '<meta http-equiv="refresh" content="1{{ value }}">',
+            [[EscapeOperation::MetaRefreshDelay, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'dynamic delay and URL' => [
+            '<meta http-equiv="refresh" content="{{ delay }};url={{ value }}">',
+            [
+                [EscapeOperation::MetaRefreshDelay, EscapeOperation::HtmlAttribute],
+                [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'constant discriminator expression' => [
+            '<meta http-equiv="{{ "refresh" }}" content="{{ value }}">',
+            [[EscapeOperation::MetaRefreshDelay, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh URL' => [
+            '<meta http-equiv="refresh" content="0; url={{ value }}">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh URL with whitespace around the equals sign' => [
+            "<meta http-equiv=\"refresh\" content=\"0; URL \t= {{ value }}\">",
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh URL path' => [
+            '<meta http-equiv="refresh" content="0; url=/users/{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh URL query' => [
+            '<meta http-equiv="refresh" content="0; url=/search?q={{ value }}">',
+            [[EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'single-quoted refresh URL' => [
+            '<meta http-equiv="refresh" content="0; url=\'{{ value }}\'">',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh URL after a whitespace separator' => [
+            '<meta http-equiv="refresh" content="0 https://example.com/{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'unquoted refresh attribute' => [
+            '<meta http-equiv=refresh content=0;url={{ value }}>',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttributeUnquoted]],
+        ];
+        yield 'explicit URL component' => [
+            '<meta http-equiv="refresh" content="0;url={{ value|e("url") }}/suffix">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'content after a quoted refresh URL' => [
+            '<meta http-equiv="refresh" content="0;url=\'https://example.com\' ignored {{ value }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'trusted refresh content' => [
+            '<meta http-equiv="refresh" content="{{ value|raw }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
+    #[DataProvider('provideAmbiguousMetaRefreshContexts')]
+    public function testRejectsAmbiguousMetaRefreshContexts(string $template, DiagnosticCode $code, array $expectedPlans = []): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([$code], $this->getDiagnosticCodes($result));
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideAmbiguousMetaRefreshContexts(): iterable
+    {
+        yield 'dynamic discriminator' => [
+            '<meta http-equiv="{{ kind }}" content="{{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'refresh discriminator after content' => [
+            '<meta content="{{ value }}" http-equiv="refresh">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'dynamic discriminator after content' => [
+            '<meta content="{{ value }}" http-equiv="{{ kind }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+            [[EscapeOperation::HtmlAttribute], [EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'conditional content before refresh discriminator' => [
+            '<meta content="{% if condition %}{{ value }}{% endif %}" http-equiv="refresh">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'conditional discriminator' => [
+            '<meta http-equiv="{% if condition %}refresh{% else %}content-type{% endif %}" content="{{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'dynamic output after delay whitespace' => [
+            '<meta http-equiv="refresh" content="0 {{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'dynamic URL without a static prefix' => [
+            '<meta http-equiv="refresh" content="0; {{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'dynamic URL after a comma' => [
+            '<meta http-equiv="refresh" content="0,{{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'partial URL prefix' => [
+            '<meta http-equiv="refresh" content="0; ur{{ value }}l=https://example.com">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'character reference in the discriminator' => [
+            '<meta http-equiv="&#114;efresh" content="{{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'character reference before the URL' => [
+            '<meta http-equiv="refresh" content="0;&semi;url={{ value }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+        ];
+        yield 'ambiguous URL part' => [
+            '<meta http-equiv="refresh" content="0;url={{ base }}/{{ path }}">',
+            DiagnosticCode::AmbiguousUrlContext,
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'output after trusted refresh content' => [
+            '<meta http-equiv="refresh" content="{{ first|raw }}{{ second }}">',
+            DiagnosticCode::AmbiguousMetaRefreshContext,
+            [[EscapeOperation::HtmlAttribute]],
+        ];
     }
 
     public function testCollectsIndependentDiagnosticsFromEveryBranch(): void
@@ -779,7 +958,7 @@ class ContextualEscapingLinterTest extends TestCase
         $module = $environment->parse($environment->tokenize(new Source('{{ value }}', 'index.html.twig')));
         $module->getNode('body')->getNode(0)->getNode('expr')->setAttribute('is_generator', true);
 
-        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser())))->analyze($module);
+        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser())))->analyze($module);
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
@@ -1294,7 +1473,7 @@ class ContextualEscapingLinterTest extends TestCase
 
     private function createLinter(Environment $environment): ContextualEscapingLinter
     {
-        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser()), new EnvironmentTemplateResolver($environment)));
+        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser()), new EnvironmentTemplateResolver($environment)));
     }
 
     /**

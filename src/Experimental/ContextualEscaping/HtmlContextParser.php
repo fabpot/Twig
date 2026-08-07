@@ -42,6 +42,7 @@ final class HtmlContextParser
     public function __construct(
         private JavaScriptContextParser $javaScriptContextParser,
         private CssContextParser $cssContextParser,
+        private MetaRefreshContextParser $metaRefreshContextParser,
     ) {
     }
 
@@ -51,7 +52,7 @@ final class HtmlContextParser
         $offset = 0;
 
         while ($offset < $length) {
-            if (HtmlState::Dead === $context->getState()) {
+            if (HtmlState::Dead === $context->getState() || $context->hasMetaRefreshConflict()) {
                 return $context;
             }
 
@@ -530,7 +531,7 @@ final class HtmlContextParser
 
     private function consumeAttributeCharacter(HtmlContext $context, string $character): HtmlContext
     {
-        $context = $context->consumeUrlCharacter($character);
+        $context = $context->consumeUrlCharacter($character)->consumeMetaElementAttributeCharacter($character);
         if (null !== $javaScriptContext = $context->getJavaScriptContext()) {
             $javaScriptContext = '&' === $character ? $javaScriptContext->withState(JavaScriptState::Unknown, JavaScriptSlashContext::Unknown) : $this->javaScriptContextParser->consume($javaScriptContext, $character);
             $context = $context->withJavaScriptContext($javaScriptContext);
@@ -539,12 +540,20 @@ final class HtmlContextParser
             $cssContext = '&' === $character ? $cssContext->withState(CssState::Unknown) : $this->cssContextParser->consume($cssContext, $character);
             $context = $context->withCssContext($cssContext);
         }
+        if (null !== $metaRefreshContext = $context->getMetaRefreshContext()) {
+            $metaRefreshContext = '&' === $character ? $metaRefreshContext->withState(MetaRefreshState::Unknown) : $this->metaRefreshContextParser->consume($metaRefreshContext, $character);
+            $context = $context->withMetaRefreshContext($metaRefreshContext);
+        }
 
         return $context;
     }
 
     private function completeTag(HtmlContext $context): HtmlContext
     {
+        $context = $context->finishAttribute();
+        if ($context->hasMetaRefreshConflict()) {
+            return $context;
+        }
         if ($context->isClosingTag()) {
             return $context->toText();
         }
@@ -560,14 +569,11 @@ final class HtmlContextParser
 
     private function finishAttributeName(HtmlContext $context, HtmlState $state): HtmlContext
     {
-        return $context->finishAttributeName($this->classifyAttribute($context->getTagName(), $context->getAttributeName()), $state);
+        return $context->finishAttributeName($this->classifyAttribute($context->getAttributeName()), $state);
     }
 
-    private function classifyAttribute(string $tagName, string $name): HtmlAttributeType
+    private function classifyAttribute(string $name): HtmlAttributeType
     {
-        if ('meta' === $tagName && 'content' === $name) {
-            return HtmlAttributeType::MetaContent;
-        }
         if (str_starts_with($name, 'data-')) {
             $name = substr($name, 5);
         } elseif (str_contains($name, ':')) {

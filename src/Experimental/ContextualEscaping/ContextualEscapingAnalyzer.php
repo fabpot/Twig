@@ -361,7 +361,7 @@ final class ContextualEscapingAnalyzer
             return $context;
         }
 
-        return match ($node::class) {
+        $context = match ($node::class) {
             BodyNode::class, Nodes::class => $this->analyzeSequence($node, $context, $explicitAutoescape),
             EmptyNode::class => $context,
             TextNode::class => $this->contextParser->consume($context, $node->getAttribute('data')),
@@ -384,6 +384,14 @@ final class ContextualEscapingAnalyzer
             CheckSecurityCallNode::class, CheckSecurityNode::class, ConfigNode::class, DeprecatedNode::class, DoNode::class, FlushNode::class, TypesNode::class => $context,
             default => $this->rejectUnknownNode($node, $context),
         };
+
+        if ($context->hasMetaRefreshConflict()) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'The meta refresh discriminator appears after dynamic content, so the required escaping cannot be determined safely.');
+
+            return $context->toDead();
+        }
+
+        return $context;
     }
 
     private function analyzeSequence(Node $nodes, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
@@ -649,6 +657,7 @@ final class ContextualEscapingAnalyzer
             }
         }
 
+        $context = $context->recordAttributeInterpolation($contentTypes->contains(ContentType::TrustedInnermost));
         $plan = $this->inferPlan($node, $context, $contentTypes);
         if (null === $plan) {
             return $this->contextAfterUnsupportedPrint($context);
@@ -659,7 +668,12 @@ final class ContextualEscapingAnalyzer
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
             ->afterCssUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
-            ->afterCssInterpolation($this->cssInterpolationCanChangeContext($contentTypes, $operations));
+            ->afterCssInterpolation($this->cssInterpolationCanChangeContext($contentTypes, $operations))
+            ->afterMetaRefreshUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
+            ->afterMetaRefreshInterpolation(
+                \in_array(EscapeOperation::MetaRefreshDelay, $operations, true),
+                $contentTypes->contains(ContentType::TrustedInnermost),
+            );
 
         return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $operations, true));
     }
@@ -865,6 +879,14 @@ final class ContextualEscapingAnalyzer
         if (HtmlAttributeType::Url === $context->getAttributeType()) {
             return $this->inferUrlPlan($node, $context, $contentTypes, $unquoted);
         }
+        if (HtmlAttributeType::MetaRefresh === $context->getAttributeType()) {
+            return $this->inferMetaRefreshPlan($node, $context, $contentTypes, $unquoted);
+        }
+        if (HtmlAttributeType::MetaContentUnknown === $context->getAttributeType()) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'The "http-equiv" attribute is dynamic, so the meta content context cannot be determined safely.');
+
+            return null;
+        }
 
         $attributeContentType = $unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute;
         $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
@@ -874,7 +896,7 @@ final class ContextualEscapingAnalyzer
             HtmlAttributeType::Html => ContentType::Html,
             HtmlAttributeType::UrlList, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
         };
-        if ($trustedInnermost && HtmlAttributeType::Plain === $context->getAttributeType()) {
+        if ($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Plain, HtmlAttributeType::MetaContent], true)) {
             return new EscapePlan([]);
         }
         if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Srcset, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
@@ -885,7 +907,7 @@ final class ContextualEscapingAnalyzer
             HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Html => 'embedded HTML',
-            HtmlAttributeType::MetaContent => 'meta refresh',
+            HtmlAttributeType::MetaContent => null,
             HtmlAttributeType::None => 'unknown contextual',
             HtmlAttributeType::Plain => null,
         };
@@ -926,6 +948,54 @@ final class ContextualEscapingAnalyzer
         }
 
         return new EscapePlan([...$operations, ...$outerPlan]);
+    }
+
+    private function inferMetaRefreshPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
+    {
+        $metaRefreshContext = $context->getMetaRefreshContext();
+        if (null === $metaRefreshContext) {
+            return $this->rejectOutputContext($node, $context);
+        }
+        if (\in_array($metaRefreshContext->getState(), [MetaRefreshState::DelayWhitespace, MetaRefreshState::BeforeUrl, MetaRefreshState::UrlPrefix, MetaRefreshState::UrlPrefixWhitespace, MetaRefreshState::Unknown], true)) {
+            $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'Output in an ambiguous meta refresh delimiter, URL prefix, or character-reference context is not supported.');
+
+            return null;
+        }
+
+        $trusted = $contentTypes->contains(ContentType::TrustedInnermost);
+        if (MetaRefreshState::Delay === $metaRefreshContext->getState()) {
+            $operations = $trusted ? [] : [EscapeOperation::MetaRefreshDelay];
+        } elseif (MetaRefreshState::Done === $metaRefreshContext->getState()) {
+            $operations = [];
+        } elseif (\in_array($metaRefreshContext->getState(), [MetaRefreshState::UrlStart, MetaRefreshState::Url, MetaRefreshState::UrlDoubleQuoted, MetaRefreshState::UrlSingleQuoted], true)) {
+            $urlPart = $metaRefreshContext->getUrlPart();
+            if (\in_array($urlPart, [UrlPart::None, UrlPart::Unknown], true)) {
+                $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic meta refresh URL without a static query or fragment delimiter is ambiguous.');
+
+                return null;
+            }
+            if ($trusted || $contentTypes->contains(ContentType::UrlComponent)) {
+                $operations = [];
+            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
+                $operations = [EscapeOperation::UrlNormalize];
+            } else {
+                $operations = match ($urlPart) {
+                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
+                    UrlPart::Path => [EscapeOperation::UrlPath],
+                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
+                };
+            }
+        } else {
+            throw new \LogicException(\sprintf('Unexpected meta refresh state "%s".', $metaRefreshContext->getState()->name));
+        }
+
+        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+        if ($operations || !$outerSafe) {
+            $operations[] = $outerOperation;
+        }
+
+        return new EscapePlan($operations);
     }
 
     /**
@@ -1284,11 +1354,12 @@ final class ContextualEscapingAnalyzer
         $joined = $contexts[0]->nudgeAttributeValue();
         foreach (\array_slice($contexts, 1) as $context) {
             $context = $context->nudgeAttributeValue();
-            if (!$joined->equals($context)) {
+            if (null === $merged = $joined->merge($context)) {
                 $this->addDiagnostic($node, DiagnosticCode::AmbiguousControlFlow, \sprintf('%s: %s and %s.', $message, $joined->describe(), $context->describe()));
 
                 return $joined->toDead();
             }
+            $joined = $merged;
         }
 
         return $joined;

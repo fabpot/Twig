@@ -29,6 +29,8 @@ final class HtmlContext
         private UrlPart $urlPart = UrlPart::None,
         private ?JavaScriptContext $javaScriptContext = null,
         private ?CssContext $cssContext = null,
+        private ?MetaElementContext $metaElementContext = null,
+        private ?MetaRefreshContext $metaRefreshContext = null,
     ) {
     }
 
@@ -72,6 +74,11 @@ final class HtmlContext
         return $this->cssContext;
     }
 
+    public function getMetaRefreshContext(): ?MetaRefreshContext
+    {
+        return $this->metaRefreshContext;
+    }
+
     public function isClosingTag(): bool
     {
         return $this->closingTag;
@@ -84,7 +91,7 @@ final class HtmlContext
 
     public function withState(HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function startTag(bool $closingTag, string $tagName = ''): self
@@ -94,21 +101,37 @@ final class HtmlContext
 
     public function appendTagName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName.strtolower($character), $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function startAttribute(string $character): self
     {
-        return new self(HtmlState::AttributeName, $this->element, $this->tagName, strtolower($character), HtmlAttributeType::None, $this->closingTag);
+        return new self(
+            HtmlState::AttributeName,
+            $this->element,
+            $this->tagName,
+            strtolower($character),
+            HtmlAttributeType::None,
+            $this->closingTag,
+            metaElementContext: $this->finishMetaElementAttribute(),
+        );
     }
 
     public function appendAttributeName(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName.strtolower($character), $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function finishAttributeName(HtmlAttributeType $type, HtmlState $state): self
     {
+        $metaElementContext = $this->metaElementContext;
+        if ('meta' === $this->tagName) {
+            $metaElementContext = ($metaElementContext ?? new MetaElementContext())->beginAttribute($this->attributeName);
+            if ('content' === $this->attributeName) {
+                $type = $metaElementContext->getContentAttributeType();
+            }
+        }
+
         return new self(
             $state,
             $this->element,
@@ -120,12 +143,14 @@ final class HtmlContext
             HtmlAttributeType::Url === $type ? UrlPart::Start : UrlPart::None,
             HtmlAttributeType::JavaScript === $type ? new JavaScriptContext() : null,
             HtmlAttributeType::Style === $type ? CssContext::forDeclarationList() : null,
+            $metaElementContext,
+            HtmlAttributeType::MetaRefresh === $type ? new MetaRefreshContext() : null,
         );
     }
 
     public function clearAttribute(HtmlState $state): self
     {
-        return new self($state, $this->element, $this->tagName, '', HtmlAttributeType::None, $this->closingTag);
+        return new self($state, $this->element, $this->tagName, '', HtmlAttributeType::None, $this->closingTag, metaElementContext: $this->finishMetaElementAttribute());
     }
 
     public function enterElement(HtmlState $state, string $element): self
@@ -140,17 +165,17 @@ final class HtmlContext
 
     public function startCandidate(HtmlState $state, string $candidate = ''): self
     {
-        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, strtolower($candidate), $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function appendCandidate(string $character): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate.strtolower($character), $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function resumeSpecial(HtmlState $state): self
     {
-        return new self($state, $this->element, javaScriptContext: $this->javaScriptContext, cssContext: $this->cssContext);
+        return new self($state, $this->element, javaScriptContext: $this->javaScriptContext, cssContext: $this->cssContext, metaElementContext: $this->metaElementContext, metaRefreshContext: $this->metaRefreshContext);
     }
 
     public function consumeUrlCharacter(string $character): self
@@ -168,7 +193,7 @@ final class HtmlContext
             $urlPart = UrlPart::Path;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart, $this->javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function afterUrlInterpolation(bool $startsPath): self
@@ -177,17 +202,50 @@ final class HtmlContext
             return $this;
         }
 
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown, $this->javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $startsPath ? UrlPart::Path : UrlPart::Unknown, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function withJavaScriptContext(JavaScriptContext $javaScriptContext): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $javaScriptContext, $this->cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $javaScriptContext, $this->cssContext, $this->metaElementContext, $this->metaRefreshContext);
     }
 
     public function withCssContext(CssContext $cssContext): self
     {
-        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $cssContext);
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $cssContext, $this->metaElementContext, $this->metaRefreshContext);
+    }
+
+    public function withMetaRefreshContext(MetaRefreshContext $metaRefreshContext): self
+    {
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext, $metaRefreshContext);
+    }
+
+    public function consumeMetaElementAttributeCharacter(string $character): self
+    {
+        if (null === $this->metaElementContext) {
+            return $this;
+        }
+
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext->consumeAttributeCharacter($character), $this->metaRefreshContext);
+    }
+
+    public function recordAttributeInterpolation(bool $trusted): self
+    {
+        if (null === $this->metaElementContext) {
+            return $this;
+        }
+
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->metaElementContext->recordInterpolation($trusted), $this->metaRefreshContext);
+    }
+
+    public function finishAttribute(): self
+    {
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $this->finishMetaElementAttribute(), $this->metaRefreshContext);
+    }
+
+    public function hasMetaRefreshConflict(): bool
+    {
+        return $this->metaElementContext?->hasRefreshConflict() ?? false;
     }
 
     public function resolveJavaScriptPendingTokenForInterpolation(): self
@@ -239,6 +297,16 @@ final class HtmlContext
         return null === $this->cssContext ? $this : $this->withCssContext($this->cssContext->afterInterpolation($unknown));
     }
 
+    public function afterMetaRefreshUrlInterpolation(bool $startsPath): self
+    {
+        return null === $this->metaRefreshContext ? $this : $this->withMetaRefreshContext($this->metaRefreshContext->afterUrlInterpolation($startsPath));
+    }
+
+    public function afterMetaRefreshInterpolation(bool $delay, bool $unknown): self
+    {
+        return null === $this->metaRefreshContext ? $this : $this->withMetaRefreshContext($this->metaRefreshContext->afterInterpolation($delay, $unknown));
+    }
+
     public function nudgeAttributeValue(): self
     {
         if (HtmlState::BeforeAttributeValue !== $this->state) {
@@ -260,7 +328,37 @@ final class HtmlContext
 
     public function equals(self $context): bool
     {
-        return $this == $context;
+        return null !== $this->merge($context);
+    }
+
+    public function merge(self $context): ?self
+    {
+        if (
+            $this->state !== $context->state
+            || $this->element !== $context->element
+            || $this->tagName !== $context->tagName
+            || $this->attributeName !== $context->attributeName
+            || $this->attributeType !== $context->attributeType
+            || $this->closingTag !== $context->closingTag
+            || $this->candidate !== $context->candidate
+            || $this->urlPart !== $context->urlPart
+            || $this->javaScriptContext != $context->javaScriptContext
+            || $this->cssContext != $context->cssContext
+            || $this->metaRefreshContext != $context->metaRefreshContext
+        ) {
+            return null;
+        }
+
+        if (null === $this->metaElementContext || null === $context->metaElementContext) {
+            if ($this->metaElementContext !== $context->metaElementContext) {
+                return null;
+            }
+            $metaElementContext = null;
+        } elseif (null === $metaElementContext = $this->metaElementContext->merge($context->metaElementContext)) {
+            return null;
+        }
+
+        return new self($this->state, $this->element, $this->tagName, $this->attributeName, $this->attributeType, $this->closingTag, $this->candidate, $this->urlPart, $this->javaScriptContext, $this->cssContext, $metaElementContext, $this->metaRefreshContext);
     }
 
     public function describe(): string
@@ -270,6 +368,9 @@ final class HtmlContext
         }
         if (null !== $this->cssContext && (HtmlState::RawText === $this->state || HtmlAttributeType::Style === $this->attributeType)) {
             return 'CSS '.$this->cssContext->getState()->name;
+        }
+        if (null !== $this->metaRefreshContext) {
+            return 'meta refresh '.$this->metaRefreshContext->getState()->name;
         }
 
         return match ($this->state) {
@@ -302,8 +403,15 @@ final class HtmlContext
             HtmlAttributeType::JavaScript => 'JavaScript event',
             HtmlAttributeType::Html => 'HTML',
             HtmlAttributeType::MetaContent => 'meta content',
+            HtmlAttributeType::MetaRefresh => 'meta refresh',
+            HtmlAttributeType::MetaContentUnknown => 'ambiguous meta content',
             HtmlAttributeType::None => 'unknown',
         });
+    }
+
+    private function finishMetaElementAttribute(): ?MetaElementContext
+    {
+        return $this->metaElementContext?->finishAttribute();
     }
 
     private function isUrlLeadingSpaceOrControl(string $character): bool

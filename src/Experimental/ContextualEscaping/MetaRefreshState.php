@@ -16,17 +16,17 @@ namespace Twig\Experimental\ContextualEscaping;
  *
  * @experimental
  */
-enum HtmlAttributeType
+enum MetaRefreshState
 {
-    case None;
-    case Plain;
+    case Delay;
+    case DelayWhitespace;
+    case BeforeUrl;
+    case UrlPrefix;
+    case UrlPrefixWhitespace;
+    case UrlStart;
     case Url;
-    case UrlList;
-    case Srcset;
-    case Style;
-    case JavaScript;
-    case Html;
-    case MetaContent;
-    case MetaRefresh;
-    case MetaContentUnknown;
+    case UrlDoubleQuoted;
+    case UrlSingleQuoted;
+    case Done;
+    case Unknown;
 }
