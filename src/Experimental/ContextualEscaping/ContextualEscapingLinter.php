@@ -53,6 +53,56 @@ final class ContextualEscapingLinter
     }
 
     /**
+     * @return \Generator<string, AnalysisResult>
+     *
+     * @throws \InvalidArgumentException When the path is not a directory
+     * @throws \RuntimeException         When a template cannot be read
+     */
+    public function lintDirectory(string $directory, ?string $namespace = null, string $extension = '.html.twig'): \Generator
+    {
+        $requestedDirectory = $directory;
+        if (false === $directory = realpath($directory)) {
+            throw new \InvalidArgumentException(\sprintf('The "%s" directory does not exist.', $requestedDirectory));
+        }
+        if (!is_dir($directory)) {
+            throw new \InvalidArgumentException(\sprintf('The "%s" path is not a directory.', $requestedDirectory));
+        }
+
+        $paths = [];
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            if ($file->isFile() && str_ends_with($file->getFilename(), $extension)) {
+                $paths[] = $file->getPathname();
+            }
+        }
+        sort($paths, \SORT_STRING);
+
+        $prefix = rtrim($directory, '/\\').\DIRECTORY_SEPARATOR;
+        foreach ($paths as $path) {
+            $relativeName = str_replace(\DIRECTORY_SEPARATOR, '/', substr($path, \strlen($prefix)));
+            $name = null === $namespace ? $relativeName : '@'.$namespace.'/'.$relativeName;
+            if (false === $contents = file_get_contents($path)) {
+                throw new \RuntimeException(\sprintf('Unable to read the "%s" template.', $path));
+            }
+
+            try {
+                $result = $this->lint(new Source($contents, $name, $path), true);
+            } catch (SyntaxError $error) {
+                $source = $error->getSourceContext();
+                $result = new AnalysisResult();
+                $result->addDiagnostic(new Diagnostic(
+                    DiagnosticCode::SyntaxError,
+                    $error->getRawMessage(),
+                    $error->getTemplateLine(),
+                    $source?->getName() ?? $name,
+                ));
+            }
+
+            yield $name => $result;
+        }
+    }
+
+    /**
      * @throws SyntaxError When the template is syntactically invalid
      */
     public function lint(Source $source, bool $force = false): AnalysisResult

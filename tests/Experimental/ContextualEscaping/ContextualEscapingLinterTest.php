@@ -25,6 +25,7 @@ use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
 use Twig\Experimental\ContextualEscaping\SrcsetContextParser;
 use Twig\Loader\ArrayLoader;
+use Twig\Loader\FilesystemLoader;
 use Twig\Node\Node;
 use Twig\Source;
 use Twig\Token;
@@ -60,6 +61,52 @@ class ContextualEscapingLinterTest extends TestCase
 
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
+
+    public function testCanLintADirectory(): void
+    {
+        $directory = __DIR__.'/Fixtures/directory';
+        $environment = new Environment(new FilesystemLoader($directory), ['optimizations' => 0]);
+
+        $results = iterator_to_array(ContextualEscapingLinter::create($environment)->lintDirectory($directory));
+
+        $this->assertSame([
+            'first.html.twig',
+            'nested/second.html.twig',
+            'syntax-error.html.twig',
+        ], array_keys($results));
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($results['first.html.twig']));
+        $this->assertSame([
+            [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+            [EscapeOperation::HtmlText],
+        ], $this->getPlans($results['nested/second.html.twig']));
+        $this->assertSame([DiagnosticCode::SyntaxError], $this->getDiagnosticCodes($results['syntax-error.html.twig']));
+        $this->assertSame('syntax-error.html.twig', $results['syntax-error.html.twig']->getDiagnostics()[0]->getTemplateName());
+    }
+
+    public function testCanLintANamespacedDirectoryWithACustomExtension(): void
+    {
+        $directory = __DIR__.'/Fixtures/directory';
+        $loader = new FilesystemLoader();
+        $loader->addPath($directory, 'scripts');
+        $environment = new Environment($loader, ['optimizations' => 0]);
+
+        $results = iterator_to_array(ContextualEscapingLinter::create($environment)->lintDirectory($directory, 'scripts', '.js.twig'));
+
+        $this->assertSame(['@scripts/ignored.js.twig'], array_keys($results));
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($results['@scripts/ignored.js.twig']));
+        $inferredEscape = $results['@scripts/ignored.js.twig']->getInferredEscapes()[0];
+        $this->assertSame('@scripts/ignored.js.twig', $inferredEscape->getNode()->getTemplateName());
+    }
+
+    public function testRejectsANonexistentLintDirectory(): void
+    {
+        $linter = ContextualEscapingLinter::create(new Environment(new ArrayLoader()));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('The "missing" directory does not exist.');
+
+        iterator_to_array($linter->lintDirectory('missing'));
     }
 
     public function testCanReuseTheLinter(): void

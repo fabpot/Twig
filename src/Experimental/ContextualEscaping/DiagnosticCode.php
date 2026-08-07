@@ -28,6 +28,7 @@ enum DiagnosticCode
     case IncompleteHtmlContext;
     case IncompleteStructuredOutput;
     case MismatchedExplicitEscaping;
+    case SyntaxError;
     case UnstableLoop;
     case UnsupportedAttributeContext;
     case UnsupportedNode;
