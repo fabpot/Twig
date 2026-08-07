@@ -14,8 +14,6 @@ namespace Twig\Experimental\ContextualEscaping;
 use Twig\Node\PrintNode;
 
 /**
- * @internal
- *
  * @experimental
  */
 final class InferredEscape

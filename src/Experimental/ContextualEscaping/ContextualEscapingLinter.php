@@ -12,21 +12,49 @@
 namespace Twig\Experimental\ContextualEscaping;
 
 use Twig\Environment;
+use Twig\Error\LoaderError;
+use Twig\Error\SyntaxError;
 use Twig\Source;
 
 /**
- * @internal
- *
  * @experimental
  */
 final class ContextualEscapingLinter
 {
-    public function __construct(
+    private function __construct(
         private Environment $environment,
         private ContextualEscapingAnalyzer $analyzer,
     ) {
     }
 
+    public static function create(Environment $environment): self
+    {
+        return new self(
+            $environment,
+            new ContextualEscapingAnalyzer(
+                new HtmlContextParser(
+                    new JavaScriptContextParser(),
+                    new CssContextParser(),
+                    new MetaRefreshContextParser(),
+                    new SrcsetContextParser(),
+                ),
+                new EnvironmentTemplateResolver($environment),
+            ),
+        );
+    }
+
+    /**
+     * @throws LoaderError When the template cannot be found
+     * @throws SyntaxError When the template is syntactically invalid
+     */
+    public function lintTemplate(string $name, bool $force = false): AnalysisResult
+    {
+        return $this->lint($this->environment->getLoader()->getSourceContext($name), $force);
+    }
+
+    /**
+     * @throws SyntaxError When the template is syntactically invalid
+     */
     public function lint(Source $source, bool $force = false): AnalysisResult
     {
         if (!$force && !str_ends_with($source->getName(), '.html.twig')) {

@@ -19,7 +19,6 @@ use Twig\Experimental\ContextualEscaping\ContextualEscapingAnalyzer;
 use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
 use Twig\Experimental\ContextualEscaping\CssContextParser;
 use Twig\Experimental\ContextualEscaping\DiagnosticCode;
-use Twig\Experimental\ContextualEscaping\EnvironmentTemplateResolver;
 use Twig\Experimental\ContextualEscaping\EscapeOperation;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
@@ -49,6 +48,16 @@ class ContextualEscapingLinterTest extends TestCase
         $result = $this->lint('{{ value }}', 'index.twig', true);
 
         $this->assertFalse($result->isSkipped());
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
+
+    public function testCanLintATemplateByLoaderName(): void
+    {
+        $environment = new Environment(new ArrayLoader(['index.html.twig' => '{{ value }}']), ['optimizations' => 0]);
+
+        $result = ContextualEscapingLinter::create($environment)->lintTemplate('index.html.twig');
+
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
     }
@@ -1601,12 +1610,12 @@ class ContextualEscapingLinterTest extends TestCase
     {
         $environment = new Environment(new ArrayLoader($templates), ['optimizations' => 0]);
 
-        return $this->createLinter($environment)->lint($environment->getLoader()->getSourceContext($name));
+        return $this->createLinter($environment)->lintTemplate($name);
     }
 
     private function createLinter(Environment $environment): ContextualEscapingLinter
     {
-        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser(), new SrcsetContextParser()), new EnvironmentTemplateResolver($environment)));
+        return ContextualEscapingLinter::create($environment);
     }
 
     /**

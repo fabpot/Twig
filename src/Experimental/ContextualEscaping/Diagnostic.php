@@ -12,8 +12,6 @@
 namespace Twig\Experimental\ContextualEscaping;
 
 /**
- * @internal
- *
  * @experimental
  */
 final class Diagnostic

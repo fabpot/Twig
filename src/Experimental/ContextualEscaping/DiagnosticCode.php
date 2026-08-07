@@ -12,8 +12,6 @@
 namespace Twig\Experimental\ContextualEscaping;
 
 /**
- * @internal
- *
  * @experimental
  */
 enum DiagnosticCode
