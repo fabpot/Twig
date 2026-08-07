@@ -61,14 +61,19 @@ they won't be generated when templates are already cached.
 Auditing Contextual Escaping
 ----------------------------
 
-.. versionadded:: 4.0
+.. versionadded:: 3.29
 
-    The experimental contextual escaping linter was introduced in Twig 4.0.
+    The experimental contextual escaping linter was introduced in Twig 3.29.
 
 The contextual escaping linter analyzes the lexical position of every output
 expression in an HTML template. It reports the escaping operations that would
 be required and rejects contexts it cannot analyze safely. The linter does not
 change template compilation or rendering.
+
+On Twig 3, the linter only analyzes templates that emit no template
+deprecations. A deprecation is reported as a syntax error because the analyzer
+targets Twig 4 semantics. Resolve all template deprecations before using the
+contextual escaping diagnostics.
 
 Create the linter from your application's configured Twig environment. Using
 that environment is important because the parser needs the same extensions,
