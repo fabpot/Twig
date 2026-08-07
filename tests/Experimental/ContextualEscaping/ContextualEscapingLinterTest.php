@@ -13,7 +13,9 @@ namespace Twig\Tests\Experimental\ContextualEscaping;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Twig\Attribute\YieldReady;
 use Twig\Environment;
+use Twig\Error\SyntaxError;
 use Twig\Experimental\ContextualEscaping\AnalysisResult;
 use Twig\Experimental\ContextualEscaping\ContextualEscapingAnalyzer;
 use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
@@ -71,6 +73,7 @@ class ContextualEscapingLinterTest extends TestCase
         $results = iterator_to_array(ContextualEscapingLinter::create($environment)->lintDirectory($directory));
 
         $this->assertSame([
+            'deprecated.html.twig',
             'first.html.twig',
             'nested/second.html.twig',
             'syntax-error.html.twig',
@@ -80,6 +83,7 @@ class ContextualEscapingLinterTest extends TestCase
             [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
             [EscapeOperation::HtmlText],
         ], $this->getPlans($results['nested/second.html.twig']));
+        $this->assertSame([DiagnosticCode::SyntaxError], $this->getDiagnosticCodes($results['deprecated.html.twig']));
         $this->assertSame([DiagnosticCode::SyntaxError], $this->getDiagnosticCodes($results['syntax-error.html.twig']));
         $this->assertSame('syntax-error.html.twig', $results['syntax-error.html.twig']->getDiagnostics()[0]->getTemplateName());
     }
@@ -109,6 +113,55 @@ class ContextualEscapingLinterTest extends TestCase
         iterator_to_array($linter->lintDirectory('missing'));
     }
 
+    public function testRejectsDeprecatedTemplateSyntax(): void
+    {
+        try {
+            $this->lint("\n{% macro greet() %}{% endmacro %}{{ _self.greet }}");
+        } catch (SyntaxError $error) {
+            $this->assertStringContainsString('Contextual escaping analysis only supports templates without deprecations', $error->getMessage());
+            $this->assertSame(2, $error->getTemplateLine());
+            $this->assertSame('index.html.twig', $error->getSourceContext()?->getName());
+
+            return;
+        }
+
+        $this->fail('A deprecated template was not rejected.');
+    }
+
+    public function testDelegatesNonTemplateDeprecationsToThePreviousHandler(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('deprecated_extension', static fn () => '', [
+            'is_safe_callback' => static function (Node $arguments): array {
+                trigger_deprecation('twig/twig', '3.29', 'The custom extension is deprecated.');
+
+                return [];
+            },
+        ]));
+        $deprecations = [];
+        set_error_handler(static function (int $type, string $message) use (&$deprecations): bool {
+            if (\E_USER_DEPRECATED === $type) {
+                $deprecations[] = $message;
+
+                return true;
+            }
+
+            return false;
+        });
+
+        try {
+            $result = $this->createLinter($environment)->lint(new Source('{{ deprecated_extension() }}', 'index.html.twig'));
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([
+            'Since twig/twig 3.29: The custom extension is deprecated.',
+            'Since twig/twig 3.29: The custom extension is deprecated.',
+        ], $deprecations);
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
+
     public function testCanReuseTheLinter(): void
     {
         $linter = $this->createLinter(new Environment(new ArrayLoader(), ['optimizations' => 0]));
@@ -123,6 +176,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideSupportedContexts
      */
     #[DataProvider('provideSupportedContexts')]
     public function testInfersPlansForSupportedContexts(string $template, array $expectedPlans): void
@@ -162,6 +217,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($result));
     }
 
+    /**
+     * @dataProvider provideUnsupportedAttributes
+     */
     #[DataProvider('provideUnsupportedAttributes')]
     public function testRejectsAttributesRequiringLanguageSpecificAnalysis(string $template): void
     {
@@ -178,6 +236,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideSrcsetContexts
      */
     #[DataProvider('provideSrcsetContexts')]
     public function testInfersPlansForSrcsetContexts(string $template, array $expectedPlans): void
@@ -283,6 +343,9 @@ class ContextualEscapingLinterTest extends TestCase
         ], $this->getPlans($result));
     }
 
+    /**
+     * @dataProvider provideAmbiguousSrcsetContexts
+     */
     #[DataProvider('provideAmbiguousSrcsetContexts')]
     public function testRejectsAmbiguousSrcsetContexts(string $template): void
     {
@@ -312,6 +375,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideUrlContexts
      */
     #[DataProvider('provideUrlContexts')]
     public function testInfersPlansForUrlContexts(string $template, array $expectedPlans): void
@@ -447,6 +512,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideMetaContentContexts
      */
     #[DataProvider('provideMetaContentContexts')]
     public function testInfersPlansForMetaContentContexts(string $template, array $expectedPlans): void
@@ -552,6 +619,9 @@ class ContextualEscapingLinterTest extends TestCase
         ];
     }
 
+    /**
+     * @dataProvider provideAmbiguousMetaRefreshContexts
+     */
     #[DataProvider('provideAmbiguousMetaRefreshContexts')]
     public function testRejectsAmbiguousMetaRefreshContexts(string $template, DiagnosticCode $code, array $expectedPlans = []): void
     {
@@ -649,6 +719,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([DiagnosticCode::CommentInterpolation], $this->getDiagnosticCodes($result));
     }
 
+    /**
+     * @dataProvider provideUnsupportedRawTextContexts
+     */
     #[DataProvider('provideUnsupportedRawTextContexts')]
     public function testRejectsOutputInRawText(string $template): void
     {
@@ -673,6 +746,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideCssContexts
      */
     #[DataProvider('provideCssContexts')]
     public function testInfersPlansForCssContexts(string $template, array $expectedPlans): void
@@ -803,6 +878,9 @@ class ContextualEscapingLinterTest extends TestCase
         ];
     }
 
+    /**
+     * @dataProvider provideStructuralCssContexts
+     */
     #[DataProvider('provideStructuralCssContexts')]
     public function testRejectsStructuralCssContexts(string $template): void
     {
@@ -820,6 +898,9 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'CSS-escaped whole style attribute' => ['<div style="{{ value|e("css") }}">'];
     }
 
+    /**
+     * @dataProvider provideCssComments
+     */
     #[DataProvider('provideCssComments')]
     public function testRejectsOutputInsideCssComments(string $template): void
     {
@@ -835,6 +916,9 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'style attribute comment' => ['<div style="color: red; /* {{ value }} */">'];
     }
 
+    /**
+     * @dataProvider provideAmbiguousCss
+     */
     #[DataProvider('provideAmbiguousCss')]
     public function testRejectsAmbiguousCssContexts(string $template): void
     {
@@ -880,6 +964,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideJavaScriptContexts
      */
     #[DataProvider('provideJavaScriptContexts')]
     public function testInfersPlansForJavaScriptContexts(string $template, array $expectedPlans): void
@@ -1001,6 +1087,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([[]], $this->getPlans($result));
     }
 
+    /**
+     * @dataProvider provideJavaScriptComments
+     */
     #[DataProvider('provideJavaScriptComments')]
     public function testRejectsOutputInsideJavaScriptComments(string $template): void
     {
@@ -1018,6 +1107,9 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'HTML double-escaped script data' => ['<script><!-- <script> </script> {{ value }}</script>'];
     }
 
+    /**
+     * @dataProvider provideAmbiguousJavaScript
+     */
     #[DataProvider('provideAmbiguousJavaScript')]
     public function testRejectsAmbiguousJavaScriptContexts(string $template): void
     {
@@ -1044,6 +1136,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertStringContainsString('JavaScript Code', $result->getDiagnostics()[0]->getMessage());
     }
 
+    /**
+     * @dataProvider provideStructuralInterpolation
+     */
     #[DataProvider('provideStructuralInterpolation')]
     public function testRejectsStructuralInterpolation(string $template): void
     {
@@ -1071,6 +1166,9 @@ class ContextualEscapingLinterTest extends TestCase
         ], $this->getPlans($result));
     }
 
+    /**
+     * @dataProvider provideConditions
+     */
     #[DataProvider('provideConditions')]
     public function testRejectsIncompatibleIfBranches(string $condition): void
     {
@@ -1110,6 +1208,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideRawExpressions
      */
     #[DataProvider('provideRawExpressions')]
     public function testTreatsRawAsTrustForTheInnermostContentType(string $template, array $expectedPlans): void
@@ -1154,6 +1254,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideMatchingExplicitEscapes
      */
     #[DataProvider('provideMatchingExplicitEscapes')]
     public function testAcceptsMatchingExplicitEscaping(string $template, array $expectedPlans): void
@@ -1185,6 +1287,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideTypedIntermediateEscapes
      */
     #[DataProvider('provideTypedIntermediateEscapes')]
     public function testAppliesOuterEscapingToTypedIntermediateContent(string $template, array $expectedPlans): void
@@ -1205,6 +1309,9 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'URL in quoted attribute' => ['<a href="{{ value|e("url") }}">', [[EscapeOperation::HtmlAttribute]]];
     }
 
+    /**
+     * @dataProvider provideUnknownExplicitEscapingStrategies
+     */
     #[DataProvider('provideUnknownExplicitEscapingStrategies')]
     public function testRejectsAnUnknownExplicitEscapingStrategy(string $template): void
     {
@@ -1222,6 +1329,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideCapturedContent
      */
     #[DataProvider('provideCapturedContent')]
     public function testPreservesProvenCapturedContentTypes(string $template, array $expectedPlans): void
@@ -1258,6 +1367,8 @@ class ContextualEscapingLinterTest extends TestCase
 
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideIncompleteCapturedContent
      */
     #[DataProvider('provideIncompleteCapturedContent')]
     public function testRejectsIncompleteCapturedContent(string $template, array $expectedPlans): void
@@ -1343,6 +1454,8 @@ class ContextualEscapingLinterTest extends TestCase
     /**
      * @param array<string, string>       $templates
      * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideSupportedComposition
      */
     #[DataProvider('provideSupportedComposition')]
     public function testAnalyzesStaticTemplateComposition(array $templates, string $name, array $expectedPlans): void
@@ -1594,6 +1707,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertStringContainsString('Recursive composition', $result->getDiagnostics()[0]->getMessage());
     }
 
+    /**
+     * @dataProvider provideUnsupportedComposition
+     */
     #[DataProvider('provideUnsupportedComposition')]
     public function testRejectsUnsupportedTemplateComposition(string $template): void
     {
@@ -1626,6 +1742,9 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([DiagnosticCode::UnsupportedNode, DiagnosticCode::UnsupportedNode], $this->getDiagnosticCodes($result));
     }
 
+    /**
+     * @dataProvider provideIncompleteHtml
+     */
     #[DataProvider('provideIncompleteHtml')]
     public function testRequiresTheTemplateToEndInHtmlText(string $template): void
     {
@@ -1697,6 +1816,7 @@ final class UnknownStatementTokenParser extends AbstractTokenParser
     }
 }
 
+#[YieldReady]
 final class UnknownStatementNode extends Node
 {
 }

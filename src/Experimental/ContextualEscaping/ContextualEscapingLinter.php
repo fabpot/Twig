@@ -111,6 +111,38 @@ final class ContextualEscapingLinter
             return new AnalysisResult(true);
         }
 
-        return $this->analyzer->analyze($this->environment->parse($this->environment->tokenize($source)));
+        $previousHandler = null;
+        $previousHandler = set_error_handler(function (int $type, string $message, string $file, int $line) use ($source, &$previousHandler): bool {
+            if (\E_USER_DEPRECATED === $type && $this->isTemplateDeprecation($message)) {
+                throw $this->createDeprecationError($message, $source);
+            }
+
+            return null === $previousHandler ? false : (bool) $previousHandler($type, $message, $file, $line);
+        });
+
+        try {
+            return $this->analyzer->analyze($this->environment->parse($this->environment->tokenize($source)));
+        } finally {
+            restore_error_handler();
+        }
+    }
+
+    private function isTemplateDeprecation(string $message): bool
+    {
+        return str_contains($message, ' at line ') && !str_contains($message, 'is not marked as ready for using "yield"');
+    }
+
+    private function createDeprecationError(string $message, Source $source): SyntaxError
+    {
+        $line = 1;
+        if (preg_match('/ in (?:"([^"]+)"|(\S+)) at line (\d+)\.?$/', $message, $matches)) {
+            $name = $matches[1] ?: $matches[2];
+            $line = (int) $matches[3];
+            if ($name !== $source->getName()) {
+                $source = new Source('', $name);
+            }
+        }
+
+        return new SyntaxError('Contextual escaping analysis only supports templates without deprecations: '.$message, $line, $source);
     }
 }
