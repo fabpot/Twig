@@ -111,9 +111,10 @@ The script boots ``App\\Kernel`` using the application's environment and adds
 an audit runner to its service container. The container injects the configured
 ``twig`` service into the runner, which analyzes every ``.html.twig`` file in
 the default Twig template directory. For each output site that needs more than
-the default HTML text escaping, it reports the inferred operations in order::
+the default HTML text escaping, it reports the inferred operations and original
+Twig expression::
 
-    article.html.twig:12 [EscapePlan] UrlPath -> HtmlAttribute
+    article.html.twig:12 [EscapePlan] UrlPath -> HtmlAttribute: {{ article.slug }}
 
 Repeated findings from template composition are deduplicated. Unsupported node
 diagnostics are grouped by node type instead of being printed for every
