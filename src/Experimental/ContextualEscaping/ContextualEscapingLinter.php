@@ -135,7 +135,7 @@ final class ContextualEscapingLinter
     private function createDeprecationError(string $message, Source $source): SyntaxError
     {
         $line = 1;
-        if (preg_match('/ in (?:"([^"]+)"|(\S+)) at line (\d+)\.?$/', $message, $matches)) {
+        if (preg_match('/(?:^|[ (])in (?:"([^"]+)"|(\S+)) at line (\d+)\)?\.?$/', $message, $matches)) {
             $name = $matches[1] ?: $matches[2];
             $line = (int) $matches[3];
             if ($name !== $source->getName()) {
