@@ -38,6 +38,7 @@ use Twig\Node\Expression\Variable\LocalVariable;
 use Twig\Node\Expression\Variable\MacroVariable;
 use Twig\Node\FlushNode;
 use Twig\Node\ForElseNode;
+use Twig\Node\ForLoopNode;
 use Twig\Node\ForNode;
 use Twig\Node\IfNode;
 use Twig\Node\ImportNode;
@@ -369,6 +370,7 @@ final class ContextualEscapingAnalyzer
             IfNode::class => $this->analyzeIf($node, $context, $explicitAutoescape),
             ForNode::class => $this->analyzeFor($node, $context, $explicitAutoescape),
             ForElseNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
+            ForLoopNode::class => $context,
             WithNode::class => $this->analyzeWith($node, $context, $explicitAutoescape),
             AutoEscapeNode::class => $this->analyzeAutoEscape($node, $context),
             SetNode::class => $this->analyzeSet($node, $context, $explicitAutoescape),
@@ -1557,6 +1559,9 @@ final class ContextualEscapingAnalyzer
             case ForElseNode::class:
                 $this->collectIndependentDiagnostics($node->getNode('body'));
 
+                return;
+
+            case ForLoopNode::class:
                 return;
 
             case WithNode::class:
