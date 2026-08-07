@@ -56,6 +56,82 @@ they won't be generated when templates are already cached.
     <https://github.com/symfony/phpunit-bridge>`_ package, which eases the
     process.
 
+.. _contextual-escaping-audit:
+
+Auditing Contextual Escaping
+----------------------------
+
+.. versionadded:: 4.0
+
+    The experimental contextual escaping linter was introduced in Twig 4.0.
+
+The contextual escaping linter analyzes the lexical position of every output
+expression in an HTML template. It reports the escaping operations that would
+be required and rejects contexts it cannot analyze safely. The linter does not
+change template compilation or rendering.
+
+Create the linter from your application's configured Twig environment. Using
+that environment is important because the parser needs the same extensions,
+loaders, functions, filters and tests as the application::
+
+    use Twig\Error\Error;
+    use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
+
+    $twig = create_your_twig_env();
+    $linter = ContextualEscapingLinter::create($twig);
+
+    $templateNames = [
+        'base.html.twig',
+        'account/profile.html.twig',
+    ];
+    $hasErrors = false;
+
+    foreach ($templateNames as $name) {
+        try {
+            $result = $linter->lintTemplate($name);
+        } catch (Error $error) {
+            fprintf(STDERR, "%s\n", $error->getMessage());
+            $hasErrors = true;
+
+            continue;
+        }
+
+        foreach ($result->getDiagnostics() as $diagnostic) {
+            fprintf(
+                STDERR,
+                "%s:%d [%s] %s\n",
+                $diagnostic->getTemplateName() ?? $name,
+                $diagnostic->getTemplateLine(),
+                $diagnostic->getCode()->name,
+                $diagnostic->getMessage(),
+            );
+            $hasErrors = true;
+        }
+    }
+
+    exit($hasErrors ? 1 : 0);
+
+Template names must be loader names rather than arbitrary filesystem paths.
+This lets the linter resolve static inheritance, includes, imports and macros
+through the configured loader. Twig loaders cannot enumerate their templates,
+so the application or framework integration must provide the template names.
+
+By default, the linter skips templates whose names do not end in
+``.html.twig``. Pass ``true`` as the second argument to analyze another
+filename::
+
+    $result = $linter->lintTemplate('email.twig', true);
+
+You can also analyze a :class:`Twig\\Source` directly with the ``lint()``
+method. This is useful when project-specific template discovery already
+provides both the logical loader name and the source code.
+
+.. caution::
+
+    The linter and its result types are experimental. Diagnostics can report an
+    unsupported construct or an analysis limitation; they do not necessarily
+    identify an exploitable vulnerability.
+
 Making a Layout conditional
 ---------------------------
 
