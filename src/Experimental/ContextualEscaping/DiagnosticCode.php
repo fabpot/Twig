@@ -22,6 +22,7 @@ enum DiagnosticCode
     case AmbiguousCssContext;
     case AmbiguousJavaScriptContext;
     case AmbiguousMetaRefreshContext;
+    case AmbiguousSrcsetContext;
     case AmbiguousUrlContext;
     case CommentInterpolation;
     case CssCommentInterpolation;

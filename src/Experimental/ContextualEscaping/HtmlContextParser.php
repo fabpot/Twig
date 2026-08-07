@@ -43,6 +43,7 @@ final class HtmlContextParser
         private JavaScriptContextParser $javaScriptContextParser,
         private CssContextParser $cssContextParser,
         private MetaRefreshContextParser $metaRefreshContextParser,
+        private SrcsetContextParser $srcsetContextParser,
     ) {
     }
 
@@ -543,6 +544,10 @@ final class HtmlContextParser
         if (null !== $metaRefreshContext = $context->getMetaRefreshContext()) {
             $metaRefreshContext = '&' === $character ? $metaRefreshContext->withState(MetaRefreshState::Unknown) : $this->metaRefreshContextParser->consume($metaRefreshContext, $character);
             $context = $context->withMetaRefreshContext($metaRefreshContext);
+        }
+        if (null !== $srcsetContext = $context->getSrcsetContext()) {
+            $srcsetContext = '&' === $character ? $srcsetContext->withState(SrcsetState::Unknown) : $this->srcsetContextParser->consume($srcsetContext, $character);
+            $context = $context->withSrcsetContext($srcsetContext);
         }
 
         return $context;

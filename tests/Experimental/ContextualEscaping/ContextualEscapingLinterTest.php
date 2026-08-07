@@ -24,6 +24,7 @@ use Twig\Experimental\ContextualEscaping\EscapeOperation;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
+use Twig\Experimental\ContextualEscaping\SrcsetContextParser;
 use Twig\Loader\ArrayLoader;
 use Twig\Node\Node;
 use Twig\Source;
@@ -116,9 +117,141 @@ class ContextualEscapingLinterTest extends TestCase
     public static function provideUnsupportedAttributes(): iterable
     {
         yield 'URL list' => ['<a ping="{{ value }}">'];
-        yield 'srcset' => ['<img srcset="{{ value }}">'];
-        yield 'link image srcset' => ['<link imagesrcset="{{ value }}">'];
         yield 'embedded HTML' => ['<iframe srcdoc="{{ value }}"></iframe>'];
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     */
+    #[DataProvider('provideSrcsetContexts')]
+    public function testInfersPlansForSrcsetContexts(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideSrcsetContexts(): iterable
+    {
+        yield 'complete srcset' => [
+            '<img srcset="{{ value }}">',
+            [[EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'link image srcset' => [
+            '<link imagesrcset="{{ value }}">',
+            [[EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'unquoted complete srcset' => [
+            '<img srcset={{ value }}>',
+            [[EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttributeUnquoted]],
+        ];
+        yield 'leading separators' => [
+            '<img srcset=",, {{ value }}">',
+            [[EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'multiple candidates' => [
+            '<img srcset="{{ first }} 1x, {{ second }} 2x">',
+            [
+                [EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute],
+                [EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'URL path' => [
+            '<img srcset="/images/{{ name }}.png 1x">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'URL query' => [
+            '<img srcset="/image.php?id={{ id }} 2x">',
+            [[EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'data URL comma' => [
+            '<img srcset="data:image/png;base64,AAAA 1x, {{ value }} 2x">',
+            [[EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'data URL payload' => [
+            '<img srcset="data:image/png;base64,AA{{ value }}AA 1x">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'URL component followed by a path segment' => [
+            '<img srcset="{{ first|e("url") }}/{{ second }} 2x">',
+            [
+                [EscapeOperation::HtmlAttribute],
+                [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'explicit srcset escaping' => [
+            '<img srcset="{{ value|e("srcset") }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'branches ending in URL paths' => [
+            '<img srcset="{% if condition %}/first/{% else %}/second/{% endif %}{{ value }} 1x">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'trusted descriptor' => [
+            '<img srcset="/image.png {{ descriptor|raw }}">',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
+    public function testUsesDeclaredTypesInSrcsetCandidates(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_srcset', static fn () => '', ['is_safe' => ['srcset']]));
+        $environment->addFunction(new TwigFunction('safe_url', static fn () => '', ['is_safe' => ['url']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<img srcset="{{ safe_srcset() }}"><img srcset="{{ safe_url() }} 1x, {{ value }} 2x">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [EscapeOperation::HtmlAttribute],
+            [EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+            [EscapeOperation::SrcsetFilter, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    public function testRejectsDeclaredTypesInAmbiguousSrcsetPositions(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('safe_srcset', static fn () => '', ['is_safe' => ['srcset']]));
+        $environment->addFunction(new TwigFunction('safe_url', static fn () => '', ['is_safe' => ['url']]));
+
+        $result = $this->createLinter($environment)->lint(new Source('<img srcset="/prefix/{{ safe_srcset() }}"><img srcset="{{ safe_url() }}{{ value }}">', 'index.html.twig'));
+
+        $this->assertSame([
+            DiagnosticCode::AmbiguousSrcsetContext,
+            DiagnosticCode::AmbiguousSrcsetContext,
+        ], $this->getDiagnosticCodes($result));
+        $this->assertSame([
+            [EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    #[DataProvider('provideAmbiguousSrcsetContexts')]
+    public function testRejectsAmbiguousSrcsetContexts(string $template): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([DiagnosticCode::AmbiguousSrcsetContext], $this->getDiagnosticCodes($result));
+    }
+
+    public static function provideAmbiguousSrcsetContexts(): iterable
+    {
+        yield 'comma in URL' => ['<img srcset="image.png,{{ value }}">'];
+        yield 'descriptor start' => ['<img srcset="image.png {{ value }}">'];
+        yield 'partial descriptor' => ['<img srcset="image.png 1{{ value }}x">'];
+        yield 'parenthesized descriptor' => ['<img srcset="image.png ({{ value }})">'];
+        yield 'character reference' => ['<img srcset="image&amp;{{ value }}">'];
+        yield 'adjacent complete values' => ['<img srcset="{{ first }}{{ second }}">'];
+    }
+
+    public function testRejectsSrcsetBranchesEndingInDifferentContexts(): void
+    {
+        $result = $this->lint('<img srcset="{% if condition %}/image/{% else %}/image.png 1x, {% endif %}{{ value }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('srcset URL path', $result->getDiagnostics()[0]->getMessage());
+        $this->assertStringContainsString('srcset candidate start', $result->getDiagnostics()[0]->getMessage());
     }
 
     /**
@@ -958,7 +1091,7 @@ class ContextualEscapingLinterTest extends TestCase
         $module = $environment->parse($environment->tokenize(new Source('{{ value }}', 'index.html.twig')));
         $module->getNode('body')->getNode(0)->getNode('expr')->setAttribute('is_generator', true);
 
-        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser())))->analyze($module);
+        $result = (new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser(), new SrcsetContextParser())))->analyze($module);
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
@@ -1473,7 +1606,7 @@ class ContextualEscapingLinterTest extends TestCase
 
     private function createLinter(Environment $environment): ContextualEscapingLinter
     {
-        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser()), new EnvironmentTemplateResolver($environment)));
+        return new ContextualEscapingLinter($environment, new ContextualEscapingAnalyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser(), new SrcsetContextParser()), new EnvironmentTemplateResolver($environment)));
     }
 
     /**

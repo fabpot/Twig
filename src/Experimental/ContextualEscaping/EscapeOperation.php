@@ -29,6 +29,7 @@ enum EscapeOperation
     case CssValue;
     case CssString;
     case MetaRefreshDelay;
+    case SrcsetFilter;
     case UrlSchemeFilter;
     case UrlNormalize;
     case UrlPath;

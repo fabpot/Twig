@@ -673,6 +673,12 @@ final class ContextualEscapingAnalyzer
             ->afterMetaRefreshInterpolation(
                 \in_array(EscapeOperation::MetaRefreshDelay, $operations, true),
                 $contentTypes->contains(ContentType::TrustedInnermost),
+            )
+            ->afterSrcsetInterpolation(
+                $contentTypes->contains(ContentType::TrustedInnermost),
+                $contentTypes->contains(ContentType::Srcset),
+                $contentTypes->contains(ContentType::Url),
+                $contentTypes->contains(ContentType::UrlComponent),
             );
 
         return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $operations, true));
@@ -882,6 +888,9 @@ final class ContextualEscapingAnalyzer
         if (HtmlAttributeType::MetaRefresh === $context->getAttributeType()) {
             return $this->inferMetaRefreshPlan($node, $context, $contentTypes, $unquoted);
         }
+        if (HtmlAttributeType::Srcset === $context->getAttributeType()) {
+            return $this->inferSrcsetPlan($node, $context, $contentTypes, $unquoted);
+        }
         if (HtmlAttributeType::MetaContentUnknown === $context->getAttributeType()) {
             $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'The "http-equiv" attribute is dynamic, so the meta content context cannot be determined safely.');
 
@@ -892,20 +901,18 @@ final class ContextualEscapingAnalyzer
         $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
         $outerPlan = $contentTypes->contains($attributeContentType) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted)) ? [] : [$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute];
         $requiredContentType = match ($context->getAttributeType()) {
-            HtmlAttributeType::Srcset => ContentType::Srcset,
             HtmlAttributeType::Html => ContentType::Html,
             HtmlAttributeType::UrlList, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
         };
         if ($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Plain, HtmlAttributeType::MetaContent], true)) {
             return new EscapePlan([]);
         }
-        if (($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Srcset, HtmlAttributeType::Html], true)) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
+        if (($trustedInnermost && HtmlAttributeType::Html === $context->getAttributeType()) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
             return new EscapePlan($outerPlan);
         }
 
         $analysis = match ($context->getAttributeType()) {
             HtmlAttributeType::UrlList => 'URL list',
-            HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Html => 'embedded HTML',
             HtmlAttributeType::MetaContent => null,
             HtmlAttributeType::None => 'unknown contextual',
@@ -948,6 +955,61 @@ final class ContextualEscapingAnalyzer
         }
 
         return new EscapePlan([...$operations, ...$outerPlan]);
+    }
+
+    private function inferSrcsetPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
+    {
+        $srcsetContext = $context->getSrcsetContext();
+        if (null === $srcsetContext) {
+            return $this->rejectOutputContext($node, $context);
+        }
+
+        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+        $outerPlan = $outerSafe ? [] : [$outerOperation];
+        if ($contentTypes->contains(ContentType::TrustedInnermost)) {
+            return new EscapePlan($outerPlan);
+        }
+
+        if (SrcsetState::BeforeUrl === $srcsetContext->getState()) {
+            if ($contentTypes->contains(ContentType::Srcset) || $contentTypes->contains(ContentType::UrlComponent)) {
+                return new EscapePlan($outerPlan);
+            }
+            if ($contentTypes->contains(ContentType::Url)) {
+                return new EscapePlan([EscapeOperation::UrlNormalize, $outerOperation]);
+            }
+
+            return new EscapePlan([EscapeOperation::SrcsetFilter, $outerOperation]);
+        }
+
+        if (SrcsetState::Url === $srcsetContext->getState()) {
+            if ($contentTypes->contains(ContentType::Srcset) || \in_array($srcsetContext->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
+                $this->addDiagnostic($node, DiagnosticCode::AmbiguousSrcsetContext, 'Output in an ambiguous srcset URL context is not supported.');
+
+                return null;
+            }
+            if ($contentTypes->contains(ContentType::UrlComponent)) {
+                return new EscapePlan($outerPlan);
+            }
+
+            $operations = match ($srcsetContext->getUrlPart()) {
+                UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
+                UrlPart::Path => [EscapeOperation::UrlPath],
+                UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
+            };
+            $operations[] = $outerOperation;
+
+            return new EscapePlan($operations);
+        }
+
+        $message = match ($srcsetContext->getState()) {
+            SrcsetState::UrlComma => 'Output immediately after a comma in a srcset URL is ambiguous because the comma may be part of the URL or terminate the candidate.',
+            SrcsetState::BeforeDescriptor, SrcsetState::Descriptor, SrcsetState::DescriptorParenthesized, SrcsetState::AfterDescriptor => 'Output expressions in srcset descriptors are not supported.',
+            SrcsetState::Unknown => 'Output after dynamic or character-reference srcset content is ambiguous.',
+        };
+        $this->addDiagnostic($node, DiagnosticCode::AmbiguousSrcsetContext, $message);
+
+        return null;
     }
 
     private function inferMetaRefreshPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
