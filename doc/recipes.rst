@@ -107,10 +107,11 @@ application directory::
 
     php vendor/bin/lint_contextual_escaping.php .
 
-The script boots ``App\\Kernel`` using the application's environment, fetches
-the configured ``twig`` service and analyzes every ``.html.twig`` file in the
-default Twig template directory. It exits with status 1 when diagnostics are
-reported and status 2 when the application cannot be booted.
+The script boots ``App\\Kernel`` using the application's environment and adds
+an audit runner to its service container. The container injects the configured
+``twig`` service into the runner, which analyzes every ``.html.twig`` file in
+the default Twig template directory. The script exits with status 1 when
+diagnostics are reported and status 2 when the application cannot be booted.
 
 ``lintDirectory()`` recursively analyzes files ending in ``.html.twig`` and
 returns an iterable keyed by their logical loader names. The directory must be
