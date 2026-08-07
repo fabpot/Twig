@@ -21,10 +21,11 @@ final class LintSymfonyApplicationScriptTest extends TestCase
 
         $this->assertSame(1, $status);
         $this->assertSame([
-            'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute',
+            'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute: {{ path }}',
+            "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute: {{ {'path': path, 'closing': '}}'}.path }}",
             'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
             '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-            'Analyzed 4 templates and 2 output sites; found 1 contextual escape plan and 3 diagnostics.',
+            'Analyzed 4 templates and 3 output sites; found 2 contextual escape plans and 3 diagnostics.',
         ], $output);
     }
 

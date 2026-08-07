@@ -12,6 +12,7 @@
 namespace Twig\Experimental\ContextualEscaping;
 
 use Twig\Environment;
+use Twig\Node\PrintNode;
 
 final class ContextualEscapingApplication
 {
@@ -36,7 +37,8 @@ final class ContextualEscapingApplication
                 $node = $inferredEscape->getNode();
                 $templateName = $node->getTemplateName() ?? $name;
                 $operations = array_map(static fn (EscapeOperation $operation): string => $operation->name, $inferredEscape->getPlan()->getOperations());
-                $siteKey = $templateName."\0".$node->getTemplateLine();
+                $expression = $this->getExpressionSnippet($node);
+                $siteKey = $templateName."\0".$node->getTemplateLine()."\0".($expression ?? '');
                 $planKey = $siteKey."\0".implode("\0", $operations);
                 $outputSites[$siteKey] = true;
 
@@ -45,7 +47,13 @@ final class ContextualEscapingApplication
                 }
 
                 $escapePlans[$planKey] = true;
-                printf("%s:%d [EscapePlan] %s\n", $templateName, $node->getTemplateLine(), implode(' -> ', $operations));
+                printf(
+                    "%s:%d [EscapePlan] %s%s\n",
+                    $templateName,
+                    $node->getTemplateLine(),
+                    implode(' -> ', $operations),
+                    null === $expression ? '' : ': '.$expression,
+                );
             }
 
             foreach ($result->getDiagnostics() as $diagnostic) {
@@ -91,5 +99,87 @@ final class ContextualEscapingApplication
         );
 
         return $diagnostics ? 1 : 0;
+    }
+
+    private function getExpressionSnippet(PrintNode $node): ?string
+    {
+        $source = $node->getSourceContext();
+        if (null === $source) {
+            return null;
+        }
+
+        $code = $source->getCode();
+        $lineStart = 0;
+        for ($line = 1; $line < $node->getTemplateLine(); ++$line) {
+            if (false === $lineStart = strpos($code, "\n", $lineStart)) {
+                return null;
+            }
+            ++$lineStart;
+        }
+        $lineEnd = strpos($code, "\n", $lineStart);
+        if (false === $lineEnd) {
+            $lineEnd = \strlen($code);
+        }
+
+        $openings = [];
+        $offset = $lineStart;
+        while (false !== $opening = strpos($code, '{{', $offset)) {
+            if ($opening >= $lineEnd) {
+                break;
+            }
+            $openings[] = $opening;
+            $offset = $opening + 2;
+        }
+
+        if (1 !== \count($openings) || null === $closing = $this->findExpressionClosing($code, $openings[0] + 2)) {
+            $line = trim(substr($code, $lineStart, $lineEnd - $lineStart));
+
+            return '' === $line ? null : $line;
+        }
+
+        $expression = preg_replace('/\h*\R\h*/', ' ', trim(substr($code, $openings[0] + 2, $closing - $openings[0] - 2)));
+
+        return '{{ '.$expression.' }}';
+    }
+
+    private function findExpressionClosing(string $code, int $offset): ?int
+    {
+        $delimiters = [];
+        $quote = null;
+        $escaped = false;
+        $length = \strlen($code);
+
+        for ($i = $offset; $i < $length; ++$i) {
+            $character = $code[$i];
+            if (null !== $quote) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ('\\' === $character) {
+                    $escaped = true;
+                } elseif ($quote === $character) {
+                    $quote = null;
+                }
+
+                continue;
+            }
+            if ('"' === $character || "'" === $character) {
+                $quote = $character;
+
+                continue;
+            }
+            if ('}' === $character && '}' === ($code[$i + 1] ?? null) && [] === $delimiters) {
+                return $i;
+            }
+            if (isset(['(' => true, '[' => true, '{' => true][$character])) {
+                $delimiters[] = $character;
+
+                continue;
+            }
+            if (isset([')' => '(', ']' => '[', '}' => '{'][$character]) && end($delimiters) === [')' => '(', ']' => '[', '}' => '{'][$character]) {
+                array_pop($delimiters);
+            }
+        }
+
+        return null;
     }
 }
