@@ -1,5 +1,6 @@
 # 3.29.0 (2026-XX-XX)
 
+ * Add a script to audit a Symfony application's templates with its configured Twig environment
  * Add directory auditing to the experimental contextual escaping linter
  * Add an experimental contextual escaping linter API for deprecation-free templates with static composition, typed safe content, URL, JavaScript, CSS, meta refresh, and srcset contexts
  * Add the `Twig\Sandbox\SandboxInterface` interface and `Twig\Sandbox\Sandbox` class to render untrusted templates through a dedicated, always-sandboxed environment crafted for it

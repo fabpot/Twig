@@ -1,4 +1,4 @@
-/bin/ export-ignore
+/bin/generate_operators_precedence.php export-ignore
 /doc/ export-ignore
 /extra/ export-ignore
 /tests/ export-ignore
