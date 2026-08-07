@@ -11,8 +11,8 @@
  */
 
 use Symfony\Component\Dotenv\Dotenv;
-use Twig\Environment;
-use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
+use Twig\Experimental\ContextualEscaping\ContextualEscapingApplication;
+use Twig\Experimental\ContextualEscaping\ContextualEscapingKernel;
 
 try {
     exit(lintSymfonyApplication($argv));
@@ -73,56 +73,29 @@ function lintSymfonyApplication(array $arguments): int
         if (!class_exists($kernelClass)) {
             throw new RuntimeException(sprintf('The "%s" Symfony kernel class cannot be loaded.', $kernelClass));
         }
+        if ((new ReflectionClass($kernelClass))->isFinal()) {
+            throw new RuntimeException(sprintf('The "%s" Symfony kernel class must not be final.', $kernelClass));
+        }
+
+        require_once __DIR__.'/Internal/ContextualEscapingApplication.php';
+        require_once __DIR__.'/Internal/ContextualEscapingKernel.php';
 
         $environment = $_SERVER['APP_ENV'] ?? $_ENV['APP_ENV'] ?? 'dev';
         $debug = filter_var($_SERVER['APP_DEBUG'] ?? $_ENV['APP_DEBUG'] ?? 'prod' !== $environment, \FILTER_VALIDATE_BOOL);
-        $kernel = new $kernelClass($environment, $debug);
+        $kernel = new ContextualEscapingKernel($environment, $debug, $projectDirectory);
         $kernel->boot();
         $container = $kernel->getContainer();
 
-        if (!$container->has('twig')) {
-            throw new RuntimeException('The Symfony application does not expose a "twig" service.');
+        if (!$container->has(ContextualEscapingApplication::class)) {
+            throw new RuntimeException('The contextual escaping application service cannot be loaded.');
         }
 
-        $twig = $container->get('twig');
-        if (!$twig instanceof Environment) {
-            throw new RuntimeException('The Symfony "twig" service is not a Twig environment.');
+        $application = $container->get(ContextualEscapingApplication::class);
+        if (!$application instanceof ContextualEscapingApplication) {
+            throw new RuntimeException('The contextual escaping application service is invalid.');
         }
 
-        $templateDirectory = $projectDirectory.'/templates';
-        if (method_exists($container, 'hasParameter') && $container->hasParameter('twig.default_path')) {
-            $templateDirectory = $container->getParameter('twig.default_path');
-        }
-        if (!is_string($templateDirectory)) {
-            throw new RuntimeException('The Symfony "twig.default_path" parameter is not a directory path.');
-        }
-
-        $templateCount = 0;
-        $diagnosticCount = 0;
-        foreach (ContextualEscapingLinter::create($twig)->lintDirectory($templateDirectory) as $name => $result) {
-            ++$templateCount;
-            foreach ($result->getDiagnostics() as $diagnostic) {
-                ++$diagnosticCount;
-                fprintf(
-                    \STDERR,
-                    "%s:%d [%s] %s\n",
-                    $diagnostic->getTemplateName() ?? $name,
-                    $diagnostic->getTemplateLine(),
-                    $diagnostic->getCode()->name,
-                    $diagnostic->getMessage(),
-                );
-            }
-        }
-
-        printf(
-            "Linted %d template%s; found %d diagnostic%s.\n",
-            $templateCount,
-            1 === $templateCount ? '' : 's',
-            $diagnosticCount,
-            1 === $diagnosticCount ? '' : 's',
-        );
-
-        return $diagnosticCount ? 1 : 0;
+        return $application->run();
     } finally {
         if (null !== $kernel) {
             $kernel->shutdown();
