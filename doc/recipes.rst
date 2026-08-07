@@ -102,6 +102,16 @@ loaders, functions, filters and tests as the application::
 
     exit($hasErrors ? 1 : 0);
 
+For a Symfony full-stack application, run the bundled script from the
+application directory::
+
+    php vendor/bin/lint_contextual_escaping.php .
+
+The script boots ``App\\Kernel`` using the application's environment, fetches
+the configured ``twig`` service and analyzes every ``.html.twig`` file in the
+default Twig template directory. It exits with status 1 when diagnostics are
+reported and status 2 when the application cannot be booted.
+
 ``lintDirectory()`` recursively analyzes files ending in ``.html.twig`` and
 returns an iterable keyed by their logical loader names. The directory must be
 a loader root so that relative names resolve static inheritance, includes,
