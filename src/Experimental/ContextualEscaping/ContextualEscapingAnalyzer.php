@@ -53,6 +53,8 @@ use Twig\Node\SetNode;
 use Twig\Node\TextNode;
 use Twig\Node\TypesNode;
 use Twig\Node\WithNode;
+use Twig\Profiler\Node\EnterProfileNode;
+use Twig\Profiler\Node\LeaveProfileNode;
 use Twig\TwigFilter;
 use Twig\TwigFunction;
 
@@ -370,7 +372,7 @@ final class ContextualEscapingAnalyzer
             IfNode::class => $this->analyzeIf($node, $context, $explicitAutoescape),
             ForNode::class => $this->analyzeFor($node, $context, $explicitAutoescape),
             ForElseNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
-            ForLoopNode::class => $context,
+            ForLoopNode::class, EnterProfileNode::class, LeaveProfileNode::class => $context,
             WithNode::class => $this->analyzeWith($node, $context, $explicitAutoescape),
             AutoEscapeNode::class => $this->analyzeAutoEscape($node, $context),
             SetNode::class => $this->analyzeSet($node, $context, $explicitAutoescape),
@@ -1562,6 +1564,8 @@ final class ContextualEscapingAnalyzer
                 return;
 
             case ForLoopNode::class:
+            case EnterProfileNode::class:
+            case LeaveProfileNode::class:
                 return;
 
             case WithNode::class:

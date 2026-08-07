@@ -26,9 +26,11 @@ use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
 use Twig\Experimental\ContextualEscaping\SrcsetContextParser;
+use Twig\Extension\ProfilerExtension;
 use Twig\Loader\ArrayLoader;
 use Twig\Loader\FilesystemLoader;
 use Twig\Node\Node;
+use Twig\Profiler\Profile;
 use Twig\Source;
 use Twig\Token;
 use Twig\TokenParser\AbstractTokenParser;
@@ -58,6 +60,17 @@ class ContextualEscapingLinterTest extends TestCase
     public function testCanLintATemplateByLoaderName(): void
     {
         $environment = new Environment(new ArrayLoader(['index.html.twig' => '{{ value }}']), ['optimizations' => 0]);
+
+        $result = ContextualEscapingLinter::create($environment)->lintTemplate('index.html.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
+
+    public function testIgnoresProfilerInstrumentation(): void
+    {
+        $environment = new Environment(new ArrayLoader(['index.html.twig' => '<p>{{ value }}</p>']), ['optimizations' => 0]);
+        $environment->addExtension(new ProfilerExtension(new Profile()));
 
         $result = ContextualEscapingLinter::create($environment)->lintTemplate('index.html.twig');
 
