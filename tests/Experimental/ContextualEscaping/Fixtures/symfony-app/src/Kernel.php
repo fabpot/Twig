@@ -123,8 +123,12 @@ namespace App;
 
 use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Twig\Attribute\YieldReady;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
+use Twig\Node\Node;
+use Twig\Token;
+use Twig\TokenParser\AbstractTokenParser;
 use Twig\TwigFunction;
 
 class Kernel
@@ -142,6 +146,7 @@ class Kernel
     {
         $twig = new Environment(new FilesystemLoader(\dirname(__DIR__).'/templates'), ['optimizations' => 0]);
         $twig->addFunction(new TwigFunction('application_value', static fn (): string => 'value'));
+        $twig->addTokenParser(new UnsupportedTokenParser());
         $container = new ContainerBuilder(
             ['twig' => $twig],
             ['twig.default_path' => \dirname(__DIR__).'/templates'],
@@ -167,4 +172,24 @@ class Kernel
     protected function build(ContainerBuilder $container): void
     {
     }
+}
+
+final class UnsupportedTokenParser extends AbstractTokenParser
+{
+    public function parse(Token $token): Node
+    {
+        $this->parser->getStream()->expect(Token::BLOCK_END_TYPE);
+
+        return new UnsupportedNode([], [], $token->getLine());
+    }
+
+    public function getTag(): string
+    {
+        return 'unsupported';
+    }
+}
+
+#[YieldReady]
+final class UnsupportedNode extends Node
+{
 }

@@ -24,15 +24,48 @@ final class ContextualEscapingApplication
     public function run(): int
     {
         $templateCount = 0;
-        $diagnosticCount = 0;
+        $outputSites = [];
+        $escapePlans = [];
+        $diagnostics = [];
+        $unsupportedNodes = [];
+
         foreach (ContextualEscapingLinter::create($this->twig)->lintDirectory($this->templateDirectory) as $name => $result) {
             ++$templateCount;
+
+            foreach ($result->getInferredEscapes() as $inferredEscape) {
+                $node = $inferredEscape->getNode();
+                $templateName = $node->getTemplateName() ?? $name;
+                $operations = array_map(static fn (EscapeOperation $operation): string => $operation->name, $inferredEscape->getPlan()->getOperations());
+                $siteKey = $templateName."\0".$node->getTemplateLine();
+                $planKey = $siteKey."\0".implode("\0", $operations);
+                $outputSites[$siteKey] = true;
+
+                if ([] === $operations || [EscapeOperation::HtmlText->name] === $operations || isset($escapePlans[$planKey])) {
+                    continue;
+                }
+
+                $escapePlans[$planKey] = true;
+                printf("%s:%d [EscapePlan] %s\n", $templateName, $node->getTemplateLine(), implode(' -> ', $operations));
+            }
+
             foreach ($result->getDiagnostics() as $diagnostic) {
-                ++$diagnosticCount;
+                $templateName = $diagnostic->getTemplateName() ?? $name;
+                $key = $templateName."\0".$diagnostic->getTemplateLine()."\0".$diagnostic->getCode()->name."\0".$diagnostic->getMessage();
+                if (isset($diagnostics[$key])) {
+                    continue;
+                }
+                $diagnostics[$key] = true;
+
+                if (DiagnosticCode::UnsupportedNode === $diagnostic->getCode()) {
+                    $unsupportedNodes[$diagnostic->getMessage()] = 1 + ($unsupportedNodes[$diagnostic->getMessage()] ?? 0);
+
+                    continue;
+                }
+
                 fprintf(
                     \STDERR,
                     "%s:%d [%s] %s\n",
-                    $diagnostic->getTemplateName() ?? $name,
+                    $templateName,
                     $diagnostic->getTemplateLine(),
                     $diagnostic->getCode()->name,
                     $diagnostic->getMessage(),
@@ -40,14 +73,23 @@ final class ContextualEscapingApplication
             }
         }
 
+        ksort($unsupportedNodes);
+        foreach ($unsupportedNodes as $message => $count) {
+            fprintf(\STDERR, "[UnsupportedNode] %d occurrence%s: %s\n", $count, 1 === $count ? '' : 's', $message);
+        }
+
         printf(
-            "Linted %d template%s; found %d diagnostic%s.\n",
+            "Analyzed %d template%s and %d output site%s; found %d contextual escape plan%s and %d diagnostic%s.\n",
             $templateCount,
             1 === $templateCount ? '' : 's',
-            $diagnosticCount,
-            1 === $diagnosticCount ? '' : 's',
+            \count($outputSites),
+            1 === \count($outputSites) ? '' : 's',
+            \count($escapePlans),
+            1 === \count($escapePlans) ? '' : 's',
+            \count($diagnostics),
+            1 === \count($diagnostics) ? '' : 's',
         );
 
-        return $diagnosticCount ? 1 : 0;
+        return $diagnostics ? 1 : 0;
     }
 }
