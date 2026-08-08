@@ -27,9 +27,10 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             'correct-javascript.html.twig:1 [EscapePlan] JavaScriptString [Current: js, correct]: {{ value }}',
             "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
             'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
+            'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
             'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
             '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-            'Analyzed 8 templates and 7 output sites; found 6 contextual escape plans (2 correct, 4 incorrect) and 3 diagnostics.',
+            'Analyzed 9 templates and 8 output sites; found 7 contextual escape plans (2 correct, 5 incorrect) and 3 diagnostics.',
         ], $output);
     }
 

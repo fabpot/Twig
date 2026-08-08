@@ -125,10 +125,13 @@ use Symfony\Component\DependencyInjection\Container;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Twig\Attribute\YieldReady;
 use Twig\Environment;
+use Twig\Lexer;
 use Twig\Loader\FilesystemLoader;
 use Twig\Node\Node;
+use Twig\Source;
 use Twig\Token;
 use Twig\TokenParser\AbstractTokenParser;
+use Twig\TokenStream;
 use Twig\TwigFunction;
 
 class Kernel
@@ -153,6 +156,7 @@ class Kernel
             },
             'optimizations' => 0,
         ]);
+        $twig->setLexer(new TransformingLexer($twig));
         $twig->addFunction(new TwigFunction('application_value', static fn (): string => 'value'));
         $twig->addTokenParser(new UnsupportedTokenParser());
         $container = new ContainerBuilder(
@@ -179,6 +183,18 @@ class Kernel
 
     protected function build(ContainerBuilder $container): void
     {
+    }
+}
+
+final class TransformingLexer extends Lexer
+{
+    public function tokenize(Source $source): TokenStream
+    {
+        return parent::tokenize(new Source(
+            str_replace('<app:url />', '<a href="{{ path }}">Link</a>', $source->getCode()),
+            $source->getName(),
+            $source->getPath(),
+        ));
     }
 }
 

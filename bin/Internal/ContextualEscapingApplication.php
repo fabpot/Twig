@@ -188,6 +188,18 @@ final class ContextualEscapingApplication
         }
 
         $code = $source->getCode();
+        $path = $source->getPath();
+        $originalCode = '' !== $path && is_file($path) ? file_get_contents($path) : false;
+        if (false !== $originalCode && $originalCode !== $code) {
+            $originalLine = $this->getSourceLine($originalCode, $node->getTemplateLine());
+            if ($originalLine !== $this->getSourceLine($code, $node->getTemplateLine())) {
+                $originalLine = trim($originalLine ?? '');
+
+                return '' === $originalLine ? null : $originalLine;
+            }
+            $code = $originalCode;
+        }
+
         $lineStart = 0;
         for ($line = 1; $line < $node->getTemplateLine(); ++$line) {
             if (false === $lineStart = strpos($code, "\n", $lineStart)) {
@@ -219,6 +231,13 @@ final class ContextualEscapingApplication
         $expression = preg_replace('/\h*\R\h*/', ' ', trim(substr($code, $openings[0] + 2, $closing - $openings[0] - 2)));
 
         return '{{ '.$expression.' }}';
+    }
+
+    private function getSourceLine(string $code, int $line): ?string
+    {
+        $lines = preg_split('/\R/', $code);
+
+        return $lines[$line - 1] ?? null;
     }
 
     private function findExpressionClosing(string $code, int $offset): ?int
