@@ -144,7 +144,15 @@ class Kernel
 
     public function boot(): void
     {
-        $twig = new Environment(new FilesystemLoader(\dirname(__DIR__).'/templates'), ['optimizations' => 0]);
+        $twig = new Environment(new FilesystemLoader(\dirname(__DIR__).'/templates'), [
+            'autoescape' => static fn (string $name): string|false => match ($name) {
+                'correct-attribute.html.twig' => 'html_attr',
+                'correct-javascript.html.twig' => 'js',
+                'unsafe-text.html.twig' => false,
+                default => 'html',
+            },
+            'optimizations' => 0,
+        ]);
         $twig->addFunction(new TwigFunction('application_value', static fn (): string => 'value'));
         $twig->addTokenParser(new UnsupportedTokenParser());
         $container = new ContainerBuilder(
