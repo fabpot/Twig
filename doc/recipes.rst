@@ -124,7 +124,8 @@ escaping is disabled or otherwise missing.
 
 Each run also writes a self-contained interactive report to
 ``var/contextual-escaping.html`` in the application. The HTML report includes
-a collapsible directory tree, groups findings by template, links to source
+a collapsible directory tree with folder and file icons, groups findings by
+template, links to source
 files and supports free-text, status and escape-operation filters. Every
 finding shows nearby source lines with the relevant expression highlighted.
 The report does not require a web server or external assets.
