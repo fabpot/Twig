@@ -122,11 +122,16 @@ escaping is reported as ``none``. Ordinary ``HtmlText`` plans remain hidden
 when the current ``html`` strategy is correct, but are reported when automatic
 escaping is disabled or otherwise missing.
 
-Repeated findings from template composition are deduplicated. Unsupported node
-diagnostics are grouped by node type instead of being printed for every
-occurrence. The script exits with status 1 when diagnostics or incorrect
-escaping strategies are reported and status 2 when the application cannot be
-booted.
+The report is flat and deduplicated. Every path identifies the template that
+contains the reported output site, even when that template was reached through
+inheritance or an include. Adjacent report entries do not imply a direct
+template reference. When a custom lexer rewrites a template before parsing,
+the report shows the corresponding original source line from disk.
+
+Unsupported node diagnostics are grouped by node type instead of being printed
+for every occurrence. The script exits with status 1 when diagnostics or
+incorrect escaping strategies are reported and status 2 when the application
+cannot be booted.
 
 ``lintDirectory()`` recursively analyzes files ending in ``.html.twig`` and
 returns an iterable keyed by their logical loader names. The directory must be
