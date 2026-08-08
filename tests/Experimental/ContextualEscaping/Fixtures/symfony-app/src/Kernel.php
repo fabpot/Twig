@@ -201,7 +201,11 @@ final class TransformingLexer extends Lexer
     public function tokenize(Source $source): TokenStream
     {
         return parent::tokenize(new Source(
-            str_replace('<app:url />', '<a href="{{ path }}">Link</a>', $source->getCode()),
+            str_replace(
+                ["<twig:Link href=\"{{\n    path\n}}\" />", '<app:url />'],
+                ["<a href=\"{{ path }}\">Link</a>\n\n", '<a href="{{ path }}">Link</a>'],
+                $source->getCode(),
+            ),
             $source->getName(),
             $source->getPath(),
         ));

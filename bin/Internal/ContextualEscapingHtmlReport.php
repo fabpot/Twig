@@ -45,11 +45,14 @@ final class ContextualEscapingHtmlReport
         ksort($entries);
         ksort($operations);
 
-        $navigation = '';
+        $navigationEntries = [];
         $sections = '';
         foreach ($entries as $template => $templateEntries) {
             $id = 'template-'.substr(hash('sha256', $template), 0, 12);
-            $navigation .= \sprintf('<a href="#%s" data-template-link="%s">%s <span>%d</span></a>', $id, $this->escape($template), $this->escape($template), \count($templateEntries));
+            $navigationEntries[$template] = [
+                'id' => $id,
+                'count' => \count($templateEntries),
+            ];
             $findings = '';
             $path = null;
             foreach ($templateEntries as $entry) {
@@ -66,6 +69,7 @@ final class ContextualEscapingHtmlReport
                 $findings,
             );
         }
+        $navigation = $this->renderNavigation($navigationEntries);
 
         $operationOptions = '';
         foreach (array_keys($operations) as $operation) {
@@ -108,10 +112,15 @@ h1 { margin: 0 0 6px; font-size: 28px; }
 .controls { display: grid; grid-template-columns: minmax(240px, 1fr) 180px 210px; gap: 12px; padding: 16px 32px; position: sticky; top: 0; z-index: 3; background: color-mix(in srgb, var(--panel) 94%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); }
 input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); }
 .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; max-width: 1500px; margin: 0 auto; padding: 24px 32px 60px; }
-nav { position: sticky; top: 86px; max-height: calc(100vh - 110px); overflow: auto; align-self: start; }
-nav a { display: flex; justify-content: space-between; gap: 10px; padding: 6px 9px; color: var(--text); text-decoration: none; border-radius: 5px; word-break: break-word; }
-nav a:hover { background: var(--panel); color: var(--accent); }
-nav span { color: var(--muted); }
+.navigation { position: sticky; top: 86px; max-height: calc(100vh - 110px); overflow: auto; align-self: start; }
+.navigation-tools { display: flex; gap: 6px; margin-bottom: 8px; }
+.navigation-tools button { flex: 1; padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text); cursor: pointer; }
+.navigation-tree a { display: flex; justify-content: space-between; gap: 10px; padding: 5px 7px; color: var(--text); text-decoration: none; border-radius: 5px; word-break: break-word; }
+.navigation-tree a:hover { background: var(--panel); color: var(--accent); }
+.navigation-tree a span, .navigation-tree summary span:last-child { color: var(--muted); }
+.navigation-tree details > div { margin-left: 12px; padding-left: 7px; border-left: 1px solid var(--border); }
+.navigation-tree summary { display: flex; justify-content: space-between; gap: 8px; padding: 5px 7px; cursor: pointer; font-weight: 650; }
+.navigation-tree summary:hover { color: var(--accent); }
 .template { margin-bottom: 22px; scroll-margin-top: 90px; }
 .template > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
 h2 { margin: 0; font-size: 18px; word-break: break-all; }
@@ -130,7 +139,13 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .line { margin-left: auto; color: var(--muted); }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .expression { display: block; padding: 9px 11px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; background: var(--bg); }
-.message { margin: 0; }
+.source { margin: 0; padding: 10px 0; overflow-x: auto; border-radius: 6px; background: var(--bg); font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.source-line { display: grid; grid-template-columns: 52px minmax(max-content, 1fr); min-height: 20px; }
+.source-number { padding: 0 10px; color: var(--muted); text-align: right; text-decoration: none; user-select: none; border-right: 1px solid var(--border); }
+.source-code { padding: 0 12px; white-space: pre; }
+.expression-highlight { padding: 2px 0; color: var(--text); background: #ffe078; border-radius: 3px; }
+@media (prefers-color-scheme: dark) { .expression-highlight { background: #745d00; } }
+.message { margin: 0 0 9px; }
 .limitations { max-width: 1500px; margin: 0 auto 32px; padding: 0 32px; }
 .limitations summary { cursor: pointer; font-weight: 700; }
 .limitations li { margin: 8px 0; }
@@ -158,7 +173,10 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <label><span hidden>Operation</span><select id="operation"><option value="">All operations</option>{$operationOptions}</select></label>
 </div>
 <div class="layout">
-<nav id="navigation">{$navigation}</nav>
+<aside class="navigation">
+<div class="navigation-tools"><button type="button" id="expand-all">Expand all</button><button type="button" id="collapse-all">Collapse all</button></div>
+<nav class="navigation-tree" id="navigation">{$navigation}</nav>
+</aside>
 <main id="report">{$sections}<p class="empty" id="empty" hidden>No matching findings.</p></main>
 </div>
 {$unsupported}
@@ -169,6 +187,7 @@ const operation = document.querySelector('#operation');
 const findings = [...document.querySelectorAll('.finding')];
 const templates = [...document.querySelectorAll('.template')];
 const links = [...document.querySelectorAll('[data-template-link]')];
+const directories = [...document.querySelectorAll('.nav-directory')];
 const empty = document.querySelector('#empty');
 function filterReport() {
     const query = search.value.trim().toLowerCase();
@@ -186,9 +205,13 @@ function filterReport() {
         const link = links.find((item) => item.dataset.templateLink === template.dataset.template);
         if (link) link.hidden = hidden;
     }
+    for (const directory of [...directories].reverse()) directory.hidden = !directory.querySelector('a:not([hidden])');
+    if (query || status.value || operation.value) for (const directory of directories) directory.open = !directory.hidden;
     empty.hidden = 0 !== visible;
 }
 for (const control of [search, status, operation]) control.addEventListener('input', filterReport);
+document.querySelector('#expand-all').addEventListener('click', () => directories.forEach((directory) => directory.open = true));
+document.querySelector('#collapse-all').addEventListener('click', () => directories.forEach((directory) => directory.open = false));
 </script>
 </body>
 </html>
@@ -204,6 +227,55 @@ HTML;
     }
 
     /**
+     * @param array<string, array{id: string, count: int}> $entries
+     */
+    private function renderNavigation(array $entries): string
+    {
+        $tree = ['count' => 0, 'directories' => [], 'files' => []];
+        foreach ($entries as $template => $entry) {
+            $parts = explode('/', $template);
+            $file = array_pop($parts);
+            $tree['count'] += $entry['count'];
+            $node = &$tree;
+            foreach ($parts as $part) {
+                $node['directories'][$part] ??= ['count' => 0, 'directories' => [], 'files' => []];
+                $node['directories'][$part]['count'] += $entry['count'];
+                $node = &$node['directories'][$part];
+            }
+            $node['files'][$file] = ['template' => $template, ...$entry];
+            unset($node);
+        }
+
+        return $this->renderNavigationNode($tree);
+    }
+
+    private function renderNavigationNode(array $node): string
+    {
+        ksort($node['directories']);
+        ksort($node['files']);
+        $html = '';
+        foreach ($node['directories'] as $name => $directory) {
+            $html .= \sprintf(
+                '<details class="nav-directory"><summary><span>%s</span><span>%d</span></summary><div>%s</div></details>',
+                $this->escape($name),
+                $directory['count'],
+                $this->renderNavigationNode($directory),
+            );
+        }
+        foreach ($node['files'] as $name => $file) {
+            $html .= \sprintf(
+                '<a href="#%s" data-template-link="%s">%s <span>%d</span></a>',
+                $file['id'],
+                $this->escape($file['template']),
+                $this->escape($name),
+                $file['count'],
+            );
+        }
+
+        return $html;
+    }
+
+    /**
      * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, type: string} $plan
      */
     private function renderPlan(array $plan): string
@@ -212,7 +284,7 @@ HTML;
         foreach ($plan['operations'] as $operation) {
             $operations .= \sprintf('<span class="badge operation">%s</span>', $this->escape($operation));
         }
-        $expression = null === $plan['expression'] ? '' : \sprintf('<code class="expression">%s</code>', $this->escape($plan['expression']));
+        $source = $this->renderSourceExcerpt($plan['path'], $plan['line'], $plan['expression']);
         $status = $plan['correct'] ? 'correct' : 'incorrect';
         $search = strtolower(implode(' ', [$plan['template'], $plan['line'], implode(' ', $plan['operations']), $plan['current'], $status, $plan['expression']]));
 
@@ -226,7 +298,7 @@ HTML;
             $operations,
             $this->escape($plan['current']),
             $plan['line'],
-            $expression,
+            $source,
         );
     }
 
@@ -238,12 +310,170 @@ HTML;
         $search = strtolower(implode(' ', [$diagnostic['template'], $diagnostic['line'], $diagnostic['code'], $diagnostic['message']]));
 
         return \sprintf(
-            '<article class="finding diagnostic" data-status="diagnostic" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="line">Line %d</span></div><p class="message">%s</p></article>',
+            '<article class="finding diagnostic" data-status="diagnostic" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="line">Line %d</span></div><p class="message">%s</p>%s</article>',
             $this->escape($search),
             $this->escape($diagnostic['code']),
             $diagnostic['line'],
             $this->escape($diagnostic['message']),
+            $this->renderSourceExcerpt($diagnostic['path'], $diagnostic['line'], null),
         );
+    }
+
+    private function renderSourceExcerpt(?string $path, int $line, ?string $expression): string
+    {
+        if (null === $path || !is_file($path) || false === $code = file_get_contents($path)) {
+            return null === $expression ? '' : \sprintf('<code class="expression">%s</code>', $this->escape($expression));
+        }
+
+        $code = str_replace(["\r\n", "\r"], "\n", $code);
+        $lines = explode("\n", $code);
+        $target = max(0, min(\count($lines) - 1, $line - 1));
+        $starts = [];
+        $offset = 0;
+        foreach ($lines as $sourceLine) {
+            $starts[] = $offset;
+            $offset += \strlen($sourceLine) + 1;
+        }
+
+        $range = $this->findHighlightRange($code, $lines, $starts, $target, $expression);
+        $rangeEndLine = $target;
+        foreach ($starts as $index => $start) {
+            if ($start >= $range[1]) {
+                break;
+            }
+            $rangeEndLine = $index;
+        }
+        $first = max(0, $target - 2);
+        $last = min(\count($lines) - 1, max($target + 2, $rangeEndLine + 2));
+        $uri = $this->fileUri($path);
+        $html = '<pre class="source">';
+        for ($index = $first; $index <= $last; ++$index) {
+            $sourceLine = $lines[$index];
+            $start = $starts[$index];
+            $end = $start + \strlen($sourceLine);
+            $highlightStart = max($start, $range[0]);
+            $highlightEnd = min($end, $range[1]);
+            if ($highlightStart < $highlightEnd) {
+                $before = $this->escape(substr($sourceLine, 0, $highlightStart - $start));
+                $highlight = $this->escape(substr($sourceLine, $highlightStart - $start, $highlightEnd - $highlightStart));
+                $after = $this->escape(substr($sourceLine, $highlightEnd - $start));
+                $sourceLine = $before.'<mark class="expression-highlight">'.$highlight.'</mark>'.$after;
+            } else {
+                $sourceLine = $this->escape($sourceLine);
+            }
+            $lineNumber = 1 + $index;
+            $html .= \sprintf(
+                '<span class="source-line"><a class="source-number" href="%s#L%d">%d</a><span class="source-code">%s</span></span>',
+                $this->escape($uri),
+                $lineNumber,
+                $lineNumber,
+                $sourceLine,
+            );
+        }
+
+        return $html.'</pre>';
+    }
+
+    /**
+     * @param list<string> $lines
+     * @param list<int>    $starts
+     *
+     * @return array{int, int}
+     */
+    private function findHighlightRange(string $code, array $lines, array $starts, int $target, ?string $expression): array
+    {
+        $lineStart = $starts[$target];
+        $lineEnd = $lineStart + \strlen($lines[$target]);
+        if (null !== $expression && str_starts_with(ltrim($expression), '<twig:')) {
+            if (false !== $opening = stripos($code, '<twig:', $lineStart)) {
+                if ($opening <= $lineEnd && null !== $closing = $this->findTagClosing($code, $opening + 6)) {
+                    return [$opening, $closing + 1];
+                }
+            }
+        }
+        if (null !== $expression && str_starts_with($expression, '{{')) {
+            if (false !== $exact = strpos($code, $expression, $lineStart)) {
+                if ($exact <= $lineEnd) {
+                    return [$exact, $exact + \strlen($expression)];
+                }
+            }
+            if (false !== $opening = strpos($code, '{{', $lineStart)) {
+                if ($opening <= $lineEnd && null !== $closing = $this->findExpressionClosing($code, $opening + 2)) {
+                    return [$opening, $closing + 2];
+                }
+            }
+        }
+        if (null !== $expression && false !== $exact = strpos($lines[$target], $expression)) {
+            return [$lineStart + $exact, $lineStart + $exact + \strlen($expression)];
+        }
+
+        return [$lineStart, $lineEnd];
+    }
+
+    private function findTagClosing(string $code, int $offset): ?int
+    {
+        $quote = null;
+        $length = \strlen($code);
+        for ($i = $offset; $i < $length; ++$i) {
+            $character = $code[$i];
+            if (null !== $quote) {
+                if ($quote === $character && '\\' !== ($code[$i - 1] ?? null)) {
+                    $quote = null;
+                }
+
+                continue;
+            }
+            if ('"' === $character || "'" === $character) {
+                $quote = $character;
+
+                continue;
+            }
+            if ('>' === $character) {
+                return $i;
+            }
+        }
+
+        return null;
+    }
+
+    private function findExpressionClosing(string $code, int $offset): ?int
+    {
+        $delimiters = [];
+        $quote = null;
+        $escaped = false;
+        $length = \strlen($code);
+        for ($i = $offset; $i < $length; ++$i) {
+            $character = $code[$i];
+            if (null !== $quote) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ('\\' === $character) {
+                    $escaped = true;
+                } elseif ($quote === $character) {
+                    $quote = null;
+                }
+
+                continue;
+            }
+            if ('"' === $character || "'" === $character) {
+                $quote = $character;
+
+                continue;
+            }
+            if ('}' === $character && '}' === ($code[$i + 1] ?? null) && [] === $delimiters) {
+                return $i;
+            }
+            if (isset(['(' => true, '[' => true, '{' => true][$character])) {
+                $delimiters[] = $character;
+
+                continue;
+            }
+            if (isset([')' => '(', ']' => '[', '}' => '{'][$character]) && end($delimiters) === [')' => '(', ']' => '[', '}' => '{'][$character]) {
+                array_pop($delimiters);
+            }
+        }
+
+        return null;
     }
 
     private function fileUri(string $path): string
