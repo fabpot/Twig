@@ -42,7 +42,10 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             $html = file_get_contents($report);
             $this->assertStringContainsString('<input id="search"', $html);
             $this->assertStringContainsString('data-status="incorrect"', $html);
-            $this->assertStringContainsString('<details class="nav-directory"><summary><span>nested</span>', $html);
+            $this->assertStringContainsString('<symbol id="tree-icon-folder-open"', $html);
+            $this->assertStringContainsString('<use href="#tree-icon-folder"></use>', $html);
+            $this->assertStringContainsString('<use href="#tree-icon-file"></use>', $html);
+            $this->assertStringContainsString('<span>nested</span>', $html);
             $this->assertStringContainsString('<mark class="expression-highlight">{{</mark>', $html);
             $this->assertStringContainsString('<mark class="expression-highlight">&lt;twig:Link href=&quot;{{</mark>', $html);
             $this->assertStringContainsString('<mark class="expression-highlight">    path</mark>', $html);
