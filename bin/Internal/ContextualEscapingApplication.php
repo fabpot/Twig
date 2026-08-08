@@ -12,6 +12,7 @@
 namespace Twig\Experimental\ContextualEscaping;
 
 use Twig\Environment;
+use Twig\Error\LoaderError;
 use Twig\Node\Expression\AbstractExpression;
 use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
@@ -21,9 +22,13 @@ use Twig\TwigFilter;
 
 final class ContextualEscapingApplication
 {
+    /** @var array<string, string|null> */
+    private array $templatePaths = [];
+
     public function __construct(
         private Environment $twig,
         private string $templateDirectory,
+        private ContextualEscapingHtmlReport $htmlReport,
     ) {
     }
 
@@ -34,6 +39,8 @@ final class ContextualEscapingApplication
         $escapePlans = [];
         $diagnostics = [];
         $unsupportedNodes = [];
+        $planRows = [];
+        $diagnosticRows = [];
 
         foreach (ContextualEscapingLinter::create($this->twig)->lintDirectory($this->templateDirectory) as $name => $result) {
             ++$templateCount;
@@ -56,6 +63,16 @@ final class ContextualEscapingApplication
                 }
 
                 $escapePlans[$planKey] = $currentIsCorrect;
+                $sourcePath = $node->getSourceContext()?->getPath();
+                $planRows[] = [
+                    'template' => $templateName,
+                    'path' => $sourcePath ?: null,
+                    'line' => $node->getTemplateLine(),
+                    'operations' => $operations,
+                    'current' => $current,
+                    'correct' => $currentIsCorrect,
+                    'expression' => $expression,
+                ];
                 printf(
                     "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",
                     $templateName,
@@ -81,6 +98,13 @@ final class ContextualEscapingApplication
                     continue;
                 }
 
+                $diagnosticRows[] = [
+                    'template' => $templateName,
+                    'path' => $this->getTemplatePath($templateName),
+                    'line' => $diagnostic->getTemplateLine(),
+                    'code' => $diagnostic->getCode()->name,
+                    'message' => $diagnostic->getMessage(),
+                ];
                 fprintf(
                     \STDERR,
                     "%s:%d [%s] %s\n",
@@ -113,7 +137,31 @@ final class ContextualEscapingApplication
             1 === \count($diagnostics) ? '' : 's',
         );
 
+        $this->htmlReport->write($planRows, $diagnosticRows, $unsupportedNodes, [
+            'templates' => $templateCount,
+            'output_sites' => \count($outputSites),
+            'correct_plans' => $correctPlanCount,
+            'incorrect_plans' => $incorrectPlanCount,
+            'diagnostics' => \count($diagnostics),
+        ]);
+        printf("HTML report: %s\n", $this->htmlReport->getPath());
+
         return $diagnostics || $incorrectPlanCount ? 1 : 0;
+    }
+
+    private function getTemplatePath(string $name): ?string
+    {
+        if (\array_key_exists($name, $this->templatePaths)) {
+            return $this->templatePaths[$name];
+        }
+
+        try {
+            $path = $this->twig->getLoader()->getSourceContext($name)->getPath();
+        } catch (LoaderError) {
+            $path = '';
+        }
+
+        return $this->templatePaths[$name] = $path ?: null;
     }
 
     /**

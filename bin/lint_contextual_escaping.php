@@ -77,6 +77,7 @@ function lintSymfonyApplication(array $arguments): int
             throw new RuntimeException(sprintf('The "%s" Symfony kernel class must not be final.', $kernelClass));
         }
 
+        require_once __DIR__.'/Internal/ContextualEscapingHtmlReport.php';
         require_once __DIR__.'/Internal/ContextualEscapingApplication.php';
         require_once __DIR__.'/Internal/ContextualEscapingKernel.php';
 

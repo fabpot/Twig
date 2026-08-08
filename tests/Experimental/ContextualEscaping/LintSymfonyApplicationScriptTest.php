@@ -17,21 +17,39 @@ final class LintSymfonyApplicationScriptTest extends TestCase
 {
     public function testLintsTemplatesWithTheApplicationTwigEnvironment(): void
     {
-        [$status, $output] = $this->runScript(__DIR__.'/Fixtures/symfony-app');
+        $projectDirectory = __DIR__.'/Fixtures/symfony-app';
+        $report = $projectDirectory.'/var/contextual-escaping.html';
 
-        $this->assertSame(1, $status);
-        $this->assertSame([
-            'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
-            "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ {'path': path, 'closing': '}}'}.path }}",
-            'correct-attribute.html.twig:1 [EscapePlan] HtmlAttribute [Current: html_attr, correct]: {{ value }}',
-            'correct-javascript.html.twig:1 [EscapePlan] JavaScriptString [Current: js, correct]: {{ value }}',
-            "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
-            'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
-            'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
-            'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
-            '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-            'Analyzed 9 templates and 8 output sites; found 7 contextual escape plans (2 correct, 5 incorrect) and 3 diagnostics.',
-        ], $output);
+        try {
+            [$status, $output] = $this->runScript($projectDirectory);
+
+            $this->assertSame(1, $status);
+            $this->assertSame([
+                'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
+                "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ {'path': path, 'closing': '}}'}.path }}",
+                'correct-attribute.html.twig:1 [EscapePlan] HtmlAttribute [Current: html_attr, correct]: {{ value }}',
+                'correct-javascript.html.twig:1 [EscapePlan] JavaScriptString [Current: js, correct]: {{ value }}',
+                "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
+                'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
+                'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
+                'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
+                '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
+                'Analyzed 9 templates and 8 output sites; found 7 contextual escape plans (2 correct, 5 incorrect) and 3 diagnostics.',
+                'HTML report: '.$report,
+            ], $output);
+            $html = file_get_contents($report);
+            $this->assertStringContainsString('<input id="search"', $html);
+            $this->assertStringContainsString('data-status="incorrect"', $html);
+            $this->assertStringContainsString('&lt;app:url /&gt;', $html);
+            $this->assertStringNotContainsString('&lt;a href=&quot;{{ path }}&quot;&gt;Link&lt;/a&gt;', $html);
+        } finally {
+            if (is_file($report)) {
+                unlink($report);
+            }
+            if (is_dir(\dirname($report)) && [] === array_diff(scandir(\dirname($report)), ['.', '..'])) {
+                rmdir(\dirname($report));
+            }
+        }
     }
 
     public function testRequiresAnApplicationPath(): void

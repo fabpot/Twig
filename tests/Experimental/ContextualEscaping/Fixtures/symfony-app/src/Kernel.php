@@ -98,6 +98,11 @@ final class Container
             throw new \RuntimeException(\sprintf('Unknown service "%s".', $id));
         }
 
+        return $this->create($id);
+    }
+
+    private function create(string $id): object
+    {
         if (isset($this->initialized[$id])) {
             return $this->initialized[$id];
         }
@@ -105,10 +110,12 @@ final class Container
         $definition = $this->definitions[$id];
         $arguments = array_map(function (mixed $argument): mixed {
             if ($argument instanceof Reference) {
-                return $this->services[$argument->getId()];
+                $id = $argument->getId();
+
+                return $this->services[$id] ?? $this->create($id);
             }
-            if (\is_string($argument) && str_starts_with($argument, '%') && str_ends_with($argument, '%')) {
-                return $this->parameters[trim($argument, '%')];
+            if (\is_string($argument) && str_contains($argument, '%')) {
+                return preg_replace_callback('/%([^%]+)%/', fn (array $matches): string => $this->parameters[$matches[1]], $argument);
             }
 
             return $argument;
@@ -161,7 +168,10 @@ class Kernel
         $twig->addTokenParser(new UnsupportedTokenParser());
         $container = new ContainerBuilder(
             ['twig' => $twig],
-            ['twig.default_path' => \dirname(__DIR__).'/templates'],
+            [
+                'kernel.project_dir' => \dirname(__DIR__),
+                'twig.default_path' => \dirname(__DIR__).'/templates',
+            ],
         );
         $this->build($container);
         $this->container = $container->createContainer();
