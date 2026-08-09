@@ -117,8 +117,11 @@ inferred operations and original Twig expression::
     x.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ x }}
 
 The ``Current`` field identifies the outer escaping strategy applied by the
-parsed template and whether it matches the inferred plan. Missing automatic
-escaping is reported as ``none``. Ordinary ``HtmlText`` plans remain hidden
+parsed template and whether it matches the inferred plan. The HTML report also
+shows nested escaping with its expression scope and whether it was explicit or
+automatic, because an inner strategy does not replace the strategy applied to
+the whole output. Missing automatic escaping is reported as ``none``. Ordinary
+``HtmlText`` plans remain hidden
 when the current ``html`` strategy is correct, but are reported when automatic
 escaping is disabled or otherwise missing. The linter reuses Twig's current
 safe-expression analysis, so output restricted to static constant branches
