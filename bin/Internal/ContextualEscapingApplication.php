@@ -17,6 +17,7 @@ use Twig\Node\Expression\AbstractExpression;
 use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
+use Twig\Node\Expression\Variable\ContextVariable;
 use Twig\Node\PrintNode;
 use Twig\TwigFilter;
 
@@ -51,7 +52,8 @@ final class ContextualEscapingApplication
                 $operationCases = $inferredEscape->getPlan()->getOperations();
                 $operations = array_map(static fn (EscapeOperation $operation): string => $operation->name, $operationCases);
                 $expression = $this->getExpressionSnippet($node);
-                $currentStrategies = $this->getCurrentEscapingStrategies($node->getNode('expr'));
+                $expressionNode = $node->getNode('expr');
+                $currentStrategies = $this->getCurrentEscapingStrategies($expressionNode);
                 $currentIsCorrect = $this->currentEscapingIsCorrect($operationCases, $currentStrategies);
                 $current = $currentStrategies ? implode(' | ', $currentStrategies) : 'none';
                 $siteKey = $templateName."\0".$node->getTemplateLine()."\0".($expression ?? '');
@@ -72,6 +74,7 @@ final class ContextualEscapingApplication
                     'current' => $current,
                     'correct' => $currentIsCorrect,
                     'expression' => $expression,
+                    'plain_variable' => $expressionNode instanceof ContextVariable,
                 ];
                 printf(
                     "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",

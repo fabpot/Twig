@@ -32,16 +32,29 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
                 'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
                 'nested/tree.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
+                "review-static.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ enabled ? 'yes' : 'no' }}",
                 'transformed-component.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <twig:Link href="{{',
+                'transformed-output.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: <app:output />',
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 11 templates and 10 output sites; found 9 contextual escape plans (2 correct, 7 incorrect) and 3 diagnostics.',
+                'Analyzed 13 templates and 12 output sites; found 11 contextual escape plans (2 correct, 9 incorrect) and 3 diagnostics.',
                 'HTML report: '.$report,
             ], $output);
             $html = file_get_contents($report);
             $this->assertStringContainsString('<input id="search"', $html);
-            $this->assertStringContainsString('data-status="incorrect"', $html);
+            $this->assertStringContainsString('<strong>6</strong>outer protection present', $html);
+            $this->assertStringContainsString('<strong>2</strong>findings to review', $html);
+            $this->assertStringContainsString('<strong>1</strong>unsafe today', $html);
+            $this->assertStringContainsString('<strong>5</strong>pipelines unavailable', $html);
+            $this->assertStringContainsString('data-assessments="partial url-trust unavailable"', $html);
+            $this->assertStringContainsString('data-assessments="review"', $html);
+            $this->assertStringContainsString('data-assessments="unsafe"', $html);
+            $this->assertStringContainsString('Outer HTML protection present', $html);
+            $this->assertStringContainsString('Check the extension runtime safety contract', $html);
+            $this->assertStringContainsString('Confirm why Twig applies no escaping', $html);
+            $this->assertStringContainsString('URL validation or trusted metadata needed', $html);
+            $this->assertStringContainsString('Never apply <code>e(\'url\')</code> to a complete URL.', $html);
             $this->assertStringContainsString('<symbol id="tree-icon-folder-open"', $html);
             $this->assertStringContainsString('<use href="#tree-icon-folder"></use>', $html);
             $this->assertStringContainsString('<use href="#tree-icon-file"></use>', $html);

@@ -202,8 +202,8 @@ final class TransformingLexer extends Lexer
     {
         return parent::tokenize(new Source(
             str_replace(
-                ["<twig:Link href=\"{{\n    path\n}}\" />", '<app:url />'],
-                ["<a href=\"{{ path }}\">Link</a>\n\n", '<a href="{{ path }}">Link</a>'],
+                ["<twig:Link href=\"{{\n    path\n}}\" />", '<app:output />', '<app:url />'],
+                ["<a href=\"{{ path }}\">Link</a>\n\n", '{% autoescape false %}{{ value }}{% endautoescape %}', '<a href="{{ path }}">Link</a>'],
                 $source->getCode(),
             ),
             $source->getName(),
