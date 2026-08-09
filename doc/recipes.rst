@@ -125,7 +125,14 @@ the whole output. Missing automatic escaping is reported as ``none``. Ordinary
 but are reported when automatic
 escaping is disabled or otherwise missing. The linter reuses Twig's current
 safe-expression analysis, so output restricted to static constant branches
-requires no escaping while still updating the surrounding lexical context. A
+requires no escaping while still updating the surrounding lexical context. It
+also follows up to 256 possible values through local assignments, static arrays
+and maps, constant index access, ``first``, ``last``, ``random``, ``merge``,
+concatenation and finite conditional branches. Values remain finite across
+control flow only when every branch is finite. Each possible rendered output,
+including a configured built-in escaping strategy, is consumed by the
+contextual parser. Incompatible output contexts remain a diagnostic; fixed
+hexadecimal CSS colors are recognized as context-preserving values. A
 multi-operation plan describes the pipeline required by future contextual
 escaping; not every operation has a corresponding Twig filter today.
 
@@ -141,8 +148,11 @@ assessment and escape-operation filters.
 Every finding shows the current and required pipelines side by side, explains
 why the output context requires the inferred operations and includes nearby
 source lines with the relevant expression highlighted. It classifies current
-protection as an exact match, outer protection only, needing review or unsafe
-today. Review findings cover source transformed by custom lexers or components
+protection as statically proven safe, an exact match, outer protection only,
+needing review or unsafe today. Statically proven findings appear under ``No
+urgent action`` with the number of possible outputs and their assignment,
+selection and lookup provenance. Review findings cover source transformed by
+custom lexers or components
 and expressions trusted by current Twig safety metadata. The latter display
 their current safe strategies so that broad legacy contracts such as ``all``
 can be reviewed in the inferred context. Additional badges identify pipelines
