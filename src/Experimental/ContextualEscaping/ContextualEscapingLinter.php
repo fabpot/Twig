@@ -27,10 +27,11 @@ final class ContextualEscapingLinter
     ) {
     }
 
-    public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null, ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null): self
+    public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null, ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null, ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null): self
     {
         $currentSafetyAnalyzer ??= new CurrentEscapingSafetyAnalyzer($environment);
         $nodeAnalyzerRegistry ??= new ContextualEscapingNodeAnalyzerRegistry([new SymfonyUxNodeAnalyzer()]);
+        $callableAnalyzerRegistry ??= new ContextualEscapingCallableAnalyzerRegistry([new SymfonyCallableAnalyzer()]);
 
         return new self(
             $environment,
@@ -45,6 +46,7 @@ final class ContextualEscapingLinter
                 $currentSafetyAnalyzer,
                 $nodeAnalyzerRegistry,
                 new StaticExpressionAnalyzer($environment),
+                $callableAnalyzerRegistry,
             ),
         );
     }

@@ -19,12 +19,14 @@ final class LintSymfonyApplicationScriptTest extends TestCase
     {
         $projectDirectory = __DIR__.'/Fixtures/symfony-app';
         $report = $projectDirectory.'/var/contextual-escaping.html';
+        $jsonReport = $projectDirectory.'/var/contextual-escaping.json';
 
         try {
             [$status, $output] = $this->runScript($projectDirectory);
 
             $this->assertSame(1, $status);
             $this->assertSame([
+                "callable-contract.html.twig:1 [EscapePlan] UrlNormalize -> CssString [Current: html, incorrect]: {{ asset('image.svg') }}",
                 'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
                 "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ {'path': path, 'closing': '}}'}.path }}",
                 'correct-attribute.html.twig:1 [EscapePlan] HtmlAttribute [Current: html_attr, correct]: {{ value }}',
@@ -40,22 +42,27 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 17 templates and 16 output sites; found 13 contextual escape plans (2 correct, 11 incorrect) and 3 diagnostics.',
+                'Analyzed 18 templates and 17 output sites; found 14 contextual escape plans (2 correct, 12 incorrect) and 3 diagnostics.',
                 'Proved 1 finite static output site safe.',
                 'HTML report: '.$report,
+                'JSON report: '.$jsonReport,
             ], $output);
             $html = file_get_contents($report);
+            $json = json_decode(file_get_contents($jsonReport), true, flags: \JSON_THROW_ON_ERROR);
+            $this->assertSame(1, $json['schema']);
+            $this->assertCount(14, $json['findings']);
+            $this->assertSame(array_column($json['findings'], 'id'), array_values(array_unique(array_column($json['findings'], 'id'))));
             $this->assertStringContainsString('<input id="search"', $html);
             $this->assertStringContainsString('<strong>7</strong>outer protection present', $html);
             $this->assertStringContainsString('<strong>2</strong>findings to review', $html);
-            $this->assertStringContainsString('<strong>2</strong>unsafe today', $html);
-            $this->assertStringContainsString('<strong>6</strong>pipelines unavailable', $html);
-            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">3</span>', $html);
+            $this->assertStringContainsString('<strong>3</strong>unsafe today', $html);
+            $this->assertStringContainsString('<strong>7</strong>pipelines unavailable', $html);
+            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">4</span>', $html);
             $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">2</span>', $html);
-            $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">6</span>', $html);
+            $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">7</span>', $html);
             $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">10</span>', $html);
             $this->assertStringContainsString('data-summary-status="unsafe"', $html);
-            $this->assertStringContainsString('<option value="application">Application (14)</option>', $html);
+            $this->assertStringContainsString('<option value="application">Application (15)</option>', $html);
             $this->assertStringContainsString('<option value="dependency">Dependencies (1)</option>', $html);
             $this->assertStringContainsString('data-assessments="partial url-trust unavailable"', $html);
             $this->assertStringContainsString('data-assessments="review"', $html);
@@ -72,10 +79,13 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             $this->assertStringContainsString('<strong>Why no escaping is required</strong><span>2 possible static outputs were analyzed directly in CSS Value.</span>', $html);
             $this->assertStringContainsString('<strong>Value provenance</strong><ol><li><code>color</code></li><li><code>random(colors)|first</code></li><li><code>random(colors)</code></li><li><code>colors</code></li><li><code>fixed local array</code></li></ol>', $html);
             $this->assertStringContainsString('<strong>Required pipeline</strong><span class="pipeline-empty">No escaping required</span>', $html);
+            $this->assertStringContainsString('<strong>Value contract</strong><ol><li><code>asset()</code></li><li><code>Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl</code></li><li><code>Url</code></li></ol>', $html);
             $this->assertStringContainsString('data-ownership="application"', $html);
             $this->assertStringContainsString('data-ownership="dependency"', $html);
             $this->assertLessThan(strpos($html, '@Dependency/link.html.twig'), strpos($html, 'contextual.html.twig'));
             $this->assertStringContainsString('URL validation or trusted metadata needed', $html);
+            $this->assertStringContainsString('data-assessments="diagnostic diagnostic-limitation"', $html);
+            $this->assertStringContainsString('Keep this structure static or provide a supported semantic contract', $html);
             $this->assertStringNotContainsString('review-static.html.twig', $html);
             $this->assertStringContainsString('Never apply <code>e(\'url\')</code> to a complete URL.', $html);
             $this->assertStringContainsString('<symbol id="tree-icon-folder-open"', $html);
@@ -92,6 +102,52 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             if (is_file($report)) {
                 unlink($report);
             }
+            if (is_file($jsonReport)) {
+                unlink($jsonReport);
+            }
+            if (is_dir(\dirname($report)) && [] === array_diff(scandir(\dirname($report)), ['.', '..'])) {
+                rmdir(\dirname($report));
+            }
+        }
+    }
+
+    public function testComparesAgainstABaseline(): void
+    {
+        $projectDirectory = __DIR__.'/Fixtures/symfony-app';
+        $report = $projectDirectory.'/var/contextual-escaping.html';
+        $jsonReport = $projectDirectory.'/var/contextual-escaping.json';
+        $baseline = $projectDirectory.'/var/contextual-escaping-baseline.json';
+
+        try {
+            [$status] = $this->runScript($projectDirectory);
+            $this->assertSame(1, $status);
+            copy($jsonReport, $baseline);
+
+            [$status, $output] = $this->runScript($projectDirectory, $baseline);
+            $this->assertSame(0, $status);
+            $this->assertSame('Baseline diff: 0 new, 0 resolved, 14 unchanged.', $output[array_key_last($output)]);
+
+            $contents = json_decode(file_get_contents($baseline), true, flags: \JSON_THROW_ON_ERROR);
+            $contents['findings'][] = ['id' => str_repeat('f', 64), 'type' => 'diagnostic'];
+            file_put_contents($baseline, json_encode($contents, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR)."\n");
+            [$status, $output] = $this->runScript($projectDirectory, $baseline);
+            $this->assertSame(0, $status);
+            $this->assertSame('Baseline diff: 0 new, 1 resolved, 14 unchanged.', $output[array_key_last($output)]);
+
+            copy($jsonReport, $baseline);
+            $contents = json_decode(file_get_contents($baseline), true, flags: \JSON_THROW_ON_ERROR);
+            array_shift($contents['findings']);
+            file_put_contents($baseline, json_encode($contents, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR)."\n");
+
+            [$status, $output] = $this->runScript($projectDirectory, $baseline);
+            $this->assertSame(1, $status);
+            $this->assertSame('Baseline diff: 1 new, 0 resolved, 13 unchanged.', $output[array_key_last($output)]);
+        } finally {
+            foreach ([$report, $jsonReport, $baseline] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
             if (is_dir(\dirname($report)) && [] === array_diff(scandir(\dirname($report)), ['.', '..'])) {
                 rmdir(\dirname($report));
             }
@@ -103,17 +159,20 @@ final class LintSymfonyApplicationScriptTest extends TestCase
         [$status, $output] = $this->runScript();
 
         $this->assertSame(2, $status);
-        $this->assertSame(['Usage: php bin/lint_contextual_escaping.php /path/to/symfony-app'], $output);
+        $this->assertSame(['Usage: php bin/lint_contextual_escaping.php /path/to/symfony-app [--baseline=/path/to/contextual-escaping.json]'], $output);
     }
 
     /**
      * @return array{int, list<string>}
      */
-    private function runScript(?string $projectDirectory = null): array
+    private function runScript(?string $projectDirectory = null, ?string $baseline = null): array
     {
         $command = escapeshellarg(\PHP_BINARY).' '.escapeshellarg(\dirname(__DIR__, 3).'/bin/lint_contextual_escaping.php');
         if (null !== $projectDirectory) {
             $command .= ' '.escapeshellarg($projectDirectory);
+        }
+        if (null !== $baseline) {
+            $command .= ' '.escapeshellarg('--baseline='.$baseline);
         }
 
         $output = [];

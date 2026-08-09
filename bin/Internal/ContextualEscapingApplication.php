@@ -34,10 +34,11 @@ final class ContextualEscapingApplication
         private string $templateDirectory,
         private ContextualEscapingHtmlReport $htmlReport,
         private CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer,
+        private ContextualEscapingBaseline $baseline,
     ) {
     }
 
-    public function run(): int
+    public function run(?string $baselinePath = null): int
     {
         $templateCount = 0;
         $outputSites = [];
@@ -96,6 +97,7 @@ final class ContextualEscapingApplication
                     'current_escapes' => $currentEscapes,
                     'provenance' => $provenance,
                     'static_output_count' => \count($inferredEscape->getStaticOutputs()),
+                    'value_contract' => $inferredEscape->getValueContract(),
                 ];
                 if ($operations) {
                     printf(
@@ -167,6 +169,10 @@ final class ContextualEscapingApplication
             printf("Proved %d finite static output site%s safe.\n", \count($staticPlans), 1 === \count($staticPlans) ? '' : 's');
         }
 
+        $jsonReport = $this->baseline->create($planRows, $diagnosticRows, $unsupportedNodes);
+        $diff = null === $baselinePath ? null : $this->baseline->compare($baselinePath, $jsonReport);
+        $this->baseline->write($jsonReport);
+
         $this->htmlReport->write($planRows, $diagnosticRows, $unsupportedNodes, [
             'templates' => $templateCount,
             'output_sites' => \count($outputSites),
@@ -175,6 +181,12 @@ final class ContextualEscapingApplication
             'diagnostics' => \count($diagnostics),
         ]);
         printf("HTML report: %s\n", $this->htmlReport->getPath());
+        printf("JSON report: %s\n", $this->baseline->getPath());
+        if (null !== $diff) {
+            printf("Baseline diff: %d new, %d resolved, %d unchanged.\n", $diff['new'], $diff['resolved'], $diff['unchanged']);
+
+            return $diff['new'] ? 1 : 0;
+        }
 
         return $diagnostics || $incorrectPlanCount ? 1 : 0;
     }

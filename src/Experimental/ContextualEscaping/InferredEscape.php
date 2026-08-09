@@ -21,6 +21,7 @@ final class InferredEscape
     /**
      * @param list<string> $provenance
      * @param list<string> $staticOutputs
+     * @param list<string> $valueContract
      */
     public function __construct(
         private PrintNode $node,
@@ -28,6 +29,7 @@ final class InferredEscape
         private string $context = 'an unknown context',
         private array $provenance = [],
         private array $staticOutputs = [],
+        private array $valueContract = [],
     ) {
     }
 
@@ -60,5 +62,13 @@ final class InferredEscape
     public function getStaticOutputs(): array
     {
         return $this->staticOutputs;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getValueContract(): array
+    {
+        return $this->valueContract;
     }
 }

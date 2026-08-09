@@ -1870,6 +1870,43 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'embed' => ['{% embed "base.html.twig" %}{% endembed %}'];
     }
 
+    public function testInfersSymfonyCallableContentTypes(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('component', ['Symfony\\UX\\TwigComponent\\Twig\\ComponentRuntime', 'render'], ['is_safe' => ['all']]));
+        $environment->addFunction(new TwigFunction('asset', ['Symfony\\Bridge\\Twig\\Extension\\AssetExtension', 'getAssetUrl']));
+        $environment->addFunction(new TwigFunction('path', ['Symfony\\Bridge\\Twig\\Extension\\RoutingExtension', 'getPath']));
+
+        $result = $this->createLinter($environment)->lint(new Source('{{ component("Alert") }}<style>.x { background: url("{{ asset("x.svg") }}") }</style><a href="{{ path("home") }}">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [],
+            [EscapeOperation::UrlNormalize, EscapeOperation::CssString],
+            [EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+        $this->assertSame([
+            'asset()',
+            'Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl',
+            'Url',
+        ], $result->getInferredEscapes()[1]->getValueContract());
+    }
+
+    public function testDoesNotTrustSymfonyFunctionNamesWithOtherCallables(): void
+    {
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addFunction(new TwigFunction('component', static fn (): string => '<div></div>', ['is_safe' => ['all']]));
+        $environment->addFunction(new TwigFunction('asset', static fn (): string => 'asset'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{{ component() }}<a href="{{ asset() }}">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [EscapeOperation::HtmlText],
+            [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
     public function testAnalyzesSupportedSymfonyUxNodes(): void
     {
         require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';

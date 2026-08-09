@@ -109,6 +109,7 @@ final class ContextualEscapingAnalyzer
         private ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null,
         private ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null,
         private ?StaticExpressionAnalyzer $staticExpressionAnalyzer = null,
+        private ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null,
     ) {
     }
 
@@ -340,7 +341,7 @@ final class ContextualEscapingAnalyzer
             $variable = $node->getNode('var')->getNode('var');
             $expression = $node->getNode('expr');
             $importedModule = $expression instanceof ContextVariable && '_self' === $expression->getAttribute('name') ? $module : $this->resolveTemplateExpression($expression, $node);
-            if ($variable instanceof MacroVariable && null !== $importedModule) {
+            if ($this->isMacroVariable($variable) && null !== $importedModule) {
                 $imports[$this->getMacroVariableKey($variable, $module)] = $importedModule;
                 $id = spl_object_id($importedModule);
                 if (!isset($visited[$id])) {
@@ -358,11 +359,16 @@ final class ContextualEscapingAnalyzer
         }
     }
 
-    private function getMacroVariableKey(MacroVariable $variable, ModuleNode $module): string
+    private function getMacroVariableKey(Node $variable, ModuleNode $module): string
     {
         $name = $variable->getAttribute('name');
 
         return \sprintf('%d:%s', spl_object_id($module), null === $name ? '@'.$variable->getTemplateLine() : $name);
+    }
+
+    private function isMacroVariable(Node $node): bool
+    {
+        return $node instanceof MacroVariable || 'Twig\\Node\\Expression\\Variable\\TemplateVariable' === $node::class;
     }
 
     private function analyzeNode(Node $node, HtmlContext $context, string|bool|null $explicitAutoescape = null): HtmlContext
@@ -541,12 +547,16 @@ final class ContextualEscapingAnalyzer
             return $context;
         }
         if (!$this->compositionScopes || !$this->moduleStack) {
-            return $this->rejectCompositionNode($node, $context);
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'The macro is used outside an analyzable template composition scope.');
+
+            return $context->toDead();
         }
 
         $template = $node->getNode('template');
-        if (!$template instanceof MacroVariable) {
-            return $this->rejectCompositionNode($node, $context);
+        if (!$this->isMacroVariable($template)) {
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The macro template expression uses the unsupported "%s" node.', $template::class));
+
+            return $context->toDead();
         }
 
         $scope = $this->compositionScopes[\count($this->compositionScopes) - 1];
@@ -559,6 +569,9 @@ final class ContextualEscapingAnalyzer
         }
 
         $name = $node->getAttribute('name');
+        if (\is_string($name) && str_starts_with($name, 'macro_')) {
+            $name = substr($name, 6);
+        }
         if (!\is_string($name) || null === $macro = $this->findMacroNode($module->getNode('macros'), $name)) {
             $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic or unknown macro names are not supported by experimental contextual escaping analysis.');
 
@@ -735,7 +748,7 @@ final class ContextualEscapingAnalyzer
             return $this->contextAfterUnsupportedPrint($context);
         }
 
-        $this->result->addInferredEscape(new InferredEscape($node, $plan, $context->describe()));
+        $this->result->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContract: $this->collectValueContracts($expression)));
         $operations = $plan->getOperations();
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
@@ -973,6 +986,9 @@ final class ContextualEscapingAnalyzer
         }
 
         if ($expression instanceof FunctionExpression) {
+            if (null !== $analysis = $this->callableAnalyzerRegistry?->analyze($expression)) {
+                return $analysis->getContentTypes();
+            }
             $function = $expression->getAttribute('twig_callable');
 
             return $function instanceof TwigFunction ? $this->contentTypesForStrategies($function->getSafe($expression->getNode('arguments')), false) : new ContentTypeSet([ContentType::PlainText]);
@@ -991,6 +1007,26 @@ final class ContextualEscapingAnalyzer
         }
 
         return new ContentTypeSet([ContentType::PlainText]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function collectValueContracts(Node $node): array
+    {
+        $contracts = [];
+        if ($node instanceof FunctionExpression && null !== $analysis = $this->callableAnalyzerRegistry?->analyze($node)) {
+            $contracts = $analysis->getProvenance();
+        }
+        foreach ($node as $child) {
+            foreach ($this->collectValueContracts($child) as $step) {
+                if (!\in_array($step, $contracts, true)) {
+                    $contracts[] = $step;
+                }
+            }
+        }
+
+        return $contracts;
     }
 
     /**

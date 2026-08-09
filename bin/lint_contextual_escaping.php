@@ -26,10 +26,15 @@ try {
  */
 function lintSymfonyApplication(array $arguments): int
 {
-    if (2 !== count($arguments)) {
-        fwrite(\STDERR, "Usage: php bin/lint_contextual_escaping.php /path/to/symfony-app\n");
+    if (2 > count($arguments) || 3 < count($arguments) || isset($arguments[2]) && !str_starts_with($arguments[2], '--baseline=')) {
+        fwrite(\STDERR, "Usage: php bin/lint_contextual_escaping.php /path/to/symfony-app [--baseline=/path/to/contextual-escaping.json]\n");
 
         return 2;
+    }
+
+    $baselinePath = isset($arguments[2]) ? substr($arguments[2], strlen('--baseline=')) : null;
+    if ('' === $baselinePath) {
+        throw new InvalidArgumentException('The contextual escaping baseline path cannot be empty.');
     }
 
     $projectDirectory = realpath($arguments[1]);
@@ -78,6 +83,7 @@ function lintSymfonyApplication(array $arguments): int
         }
 
         require_once __DIR__.'/Internal/ContextualEscapingHtmlReport.php';
+        require_once __DIR__.'/Internal/ContextualEscapingBaseline.php';
         require_once __DIR__.'/Internal/ContextualEscapingApplication.php';
         require_once __DIR__.'/Internal/ContextualEscapingKernel.php';
 
@@ -96,7 +102,7 @@ function lintSymfonyApplication(array $arguments): int
             throw new RuntimeException('The contextual escaping application service is invalid.');
         }
 
-        return $application->run();
+        return $application->run($baselinePath);
     } finally {
         if (null !== $kernel) {
             $kernel->shutdown();

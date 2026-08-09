@@ -25,10 +25,10 @@ final class ContextualEscapingHtmlReport
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                                                                          $diagnostics
-     * @param array<string, int>                                                                                                                                                                                                                                                                                                                                                                  $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                                                                                $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, value_contract: list<string>}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                                                                                                        $diagnostics
+     * @param array<string, int>                                                                                                                                                                                                                                                                                                                                                                                                $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                                                                                                              $summary
      */
     public function write(array $plans, array $diagnostics, array $unsupportedNodes, array $summary): void
     {
@@ -250,7 +250,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <div class="controls">
 <label><span hidden>Search</span><input id="search" type="search" placeholder="Filter templates, expressions, operations..."></label>
 <label><span hidden>Ownership</span><select id="ownership"><option value="">Application and dependencies</option><option value="application">Application ({$ownershipCounts['application']})</option><option value="dependency">Dependencies ({$ownershipCounts['dependency']})</option></select></label>
-<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="proven">Statically proven safe</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option></select></label>
+<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="proven">Statically proven safe</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option><option value="diagnostic-ambiguity">Ambiguous template context</option><option value="diagnostic-error">Template error</option><option value="diagnostic-limitation">Analyzer limitation</option></select></label>
 <label><span hidden>Operation</span><select id="operation"><option value="">All operations</option>{$operationOptions}</select></label>
 </div>
 <div class="layout">
@@ -527,7 +527,7 @@ HTML;
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, ownership: 'application'|'dependency', type: string, assessment: array{status: 'proven'|'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}} $plan
+     * @param array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, value_contract: list<string>, ownership: 'application'|'dependency', type: string, assessment: array{status: 'proven'|'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}} $plan
      */
     private function renderPlan(array $plan): string
     {
@@ -544,7 +544,7 @@ HTML;
         $contextReason = 'proven' === $assessment['status']
             ? \sprintf('%d possible static output%s %s analyzed directly in %s.', $plan['static_output_count'], 1 === $plan['static_output_count'] ? '' : 's', 1 === $plan['static_output_count'] ? 'was' : 'were', $plan['context'])
             : $this->describeContextReason($plan['context']);
-        $provenance = $this->renderProvenance($plan['provenance']);
+        $provenance = $this->renderProvenance($plan['provenance'], 'Value provenance').$this->renderProvenance($plan['value_contract'], 'Value contract');
         $search = strtolower(implode(' ', [
             $plan['template'],
             $plan['line'],
@@ -553,6 +553,7 @@ HTML;
             $plan['context'],
             $contextReason,
             implode(' ', $plan['provenance']),
+            implode(' ', $plan['value_contract']),
             $current,
             implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
             $assessment['label'],
@@ -630,7 +631,7 @@ HTML;
     /**
      * @param list<string> $provenance
      */
-    private function renderProvenance(array $provenance): string
+    private function renderProvenance(array $provenance, string $label): string
     {
         if (!$provenance) {
             return '';
@@ -641,7 +642,7 @@ HTML;
             $steps .= '<li><code>'.$this->escape($step).'</code></li>';
         }
 
-        return '<div class="provenance"><strong>Value provenance</strong><ol>'.$steps.'</ol></div>';
+        return '<div class="provenance"><strong>'.$this->escape($label).'</strong><ol>'.$steps.'</ol></div>';
     }
 
     private function describeContextReason(string $context): string
@@ -704,18 +705,54 @@ HTML;
      */
     private function renderDiagnostic(array $diagnostic): string
     {
-        $search = strtolower(implode(' ', [$diagnostic['template'], $diagnostic['line'], $diagnostic['ownership'], $diagnostic['code'], $diagnostic['message']]));
+        $assessment = $this->assessDiagnostic($diagnostic['code']);
+        $search = strtolower(implode(' ', [$diagnostic['template'], $diagnostic['line'], $diagnostic['ownership'], $diagnostic['code'], $diagnostic['message'], $assessment['label'], $assessment['guidance']]));
 
         return \sprintf(
-            '<article class="finding diagnostic" data-views="action" data-ownership="%s" data-assessments="diagnostic" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span><span class="line">Line %d</span></div><p class="message">%s</p>%s</article>',
+            '<article class="finding diagnostic" data-views="action" data-ownership="%s" data-assessments="diagnostic %s" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span><span class="badge capability">%s</span><span class="line">Line %d</span></div><p class="message">%s</p><p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
             $diagnostic['ownership'],
+            $assessment['assessment'],
             $this->escape($search),
             $this->escape($diagnostic['code']),
             $this->escape('application' === $diagnostic['ownership'] ? 'Application' : 'Dependency'),
+            $this->escape($assessment['label']),
             $diagnostic['line'],
             $this->escape($diagnostic['message']),
+            $this->escape($assessment['title']),
+            $this->escape($assessment['guidance']),
             $this->renderSourceExcerpt($diagnostic['path'], $diagnostic['line'], null),
         );
+    }
+
+    /**
+     * @return array{assessment: 'diagnostic-ambiguity'|'diagnostic-error'|'diagnostic-limitation', label: string, title: string, guidance: string}
+     */
+    private function assessDiagnostic(string $code): array
+    {
+        if (str_starts_with($code, 'Ambiguous') || str_starts_with($code, 'Incomplete') || 'UnstableLoop' === $code) {
+            return [
+                'assessment' => 'diagnostic-ambiguity',
+                'label' => 'Ambiguous template context',
+                'title' => 'Make every possible path end in the same context',
+                'guidance' => 'Add static delimiters or restructure the branches so the HTML, CSS, JavaScript, or URL parser state is identical before later output.',
+            ];
+        }
+
+        if (\in_array($code, ['SyntaxError', 'MismatchedExplicitEscaping'], true)) {
+            return [
+                'assessment' => 'diagnostic-error',
+                'label' => 'Template error',
+                'title' => 'Fix the template before contextual analysis',
+                'guidance' => 'Correct the syntax, remove deprecated template constructs, or use a supported explicit escaping strategy, then run the audit again.',
+            ];
+        }
+
+        return [
+            'assessment' => 'diagnostic-limitation',
+            'label' => 'Analyzer limitation',
+            'title' => 'Keep this structure static or provide a supported semantic contract',
+            'guidance' => 'The analyzer cannot follow this composition or structural output yet. Prefer static template references and complete static HTML structure; do not add an escaping filter blindly.',
+        ];
     }
 
     private function renderSourceExcerpt(?string $path, int $line, ?string $expression): string
