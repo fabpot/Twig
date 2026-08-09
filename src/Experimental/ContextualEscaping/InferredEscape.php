@@ -21,6 +21,7 @@ final class InferredEscape
     public function __construct(
         private PrintNode $node,
         private EscapePlan $plan,
+        private string $context = 'an unknown context',
     ) {
     }
 
@@ -32,5 +33,10 @@ final class InferredEscape
     public function getPlan(): EscapePlan
     {
         return $this->plan;
+    }
+
+    public function getContext(): string
+    {
+        return $this->context;
     }
 }

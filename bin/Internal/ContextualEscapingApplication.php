@@ -77,6 +77,7 @@ final class ContextualEscapingApplication
                     'path' => $sourcePath ?: null,
                     'line' => $node->getTemplateLine(),
                     'operations' => $operations,
+                    'context' => $inferredEscape->getContext(),
                     'current' => $current,
                     'correct' => $currentIsCorrect,
                     'expression' => $expression,

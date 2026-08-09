@@ -2,6 +2,7 @@
 
  * Add a script with terminal and interactive HTML reports to audit a Symfony application's templates with its configured Twig environment
  * Show scoped outer and nested escaping strategies in contextual HTML reports
+ * Add task-oriented views and template ownership to contextual HTML reports
  * Add directory auditing to the experimental contextual escaping linter
  * Reuse current escaping safety analysis for constant-output contextual plans
  * Add contextual escaping analysis for supported Symfony UX component nodes

@@ -114,6 +114,7 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($results['@scripts/ignored.js.twig']));
         $inferredEscape = $results['@scripts/ignored.js.twig']->getInferredEscapes()[0];
         $this->assertSame('@scripts/ignored.js.twig', $inferredEscape->getNode()->getTemplateName());
+        $this->assertSame('HTML text', $inferredEscape->getContext());
     }
 
     public function testRejectsANonexistentLintDirectory(): void

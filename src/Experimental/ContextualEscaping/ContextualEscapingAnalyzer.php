@@ -648,13 +648,13 @@ final class ContextualEscapingAnalyzer
         }
 
         if ($this->currentSafetyAnalyzer?->analyze($expression)['constant_output']) {
-            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([])));
+            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
 
             return $this->analyzeConstantOutput($expression, $context, $node);
         }
 
         if ($expression instanceof ConstantExpression && !$expression->isDefinedTestEnabled() && \is_string($expression->getAttribute('value'))) {
-            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([])));
+            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
 
             return $this->contextParser->consume($context, $expression->getAttribute('value'));
         }
@@ -675,7 +675,7 @@ final class ContextualEscapingAnalyzer
             return $this->contextAfterUnsupportedPrint($context);
         }
 
-        $this->result->addInferredEscape(new InferredEscape($node, $plan));
+        $this->result->addInferredEscape(new InferredEscape($node, $plan, $context->describe()));
         $operations = $plan->getOperations();
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))

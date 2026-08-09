@@ -32,7 +32,7 @@ final class ContextualEscapingKernel extends Kernel
         parent::build($container);
 
         $container->register(ContextualEscapingHtmlReport::class)
-            ->setArguments(['%kernel.project_dir%/var/contextual-escaping.html'])
+            ->setArguments(['%kernel.project_dir%/var/contextual-escaping.html', '%kernel.project_dir%'])
         ;
         $container->register(CurrentEscapingSafetyAnalyzer::class)
             ->setArguments([new Reference('twig')])

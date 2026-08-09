@@ -15,6 +15,7 @@ final class ContextualEscapingHtmlReport
 {
     public function __construct(
         private string $path,
+        private string $projectDirectory,
     ) {
     }
 
@@ -24,20 +25,29 @@ final class ContextualEscapingHtmlReport
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                     $diagnostics
-     * @param array<string, int>                                                                                                                                                                                                                                                                                             $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                           $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                      $diagnostics
+     * @param array<string, int>                                                                                                                                                                                                                                                                                                              $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                            $summary
      */
     public function write(array $plans, array $diagnostics, array $unsupportedNodes, array $summary): void
     {
         $entries = [];
         $operations = [];
+        $templateOwnership = [];
         $assessmentCounts = ['correct' => 0, 'partial' => 0, 'review' => 0, 'unsafe' => 0, 'unavailable' => 0];
+        $viewCounts = ['action' => 0, 'review' => 0, 'future' => 0, 'no-urgent' => 0, 'all' => \count($plans) + \count($diagnostics)];
+        $ownershipCounts = ['application' => 0, 'dependency' => 0];
         foreach ($plans as $plan) {
             $assessment = $this->assessPlan($plan);
-            $entries[$plan['template']][] = ['type' => 'plan', 'assessment' => $assessment, ...$plan];
+            $ownership = $this->classifyOwnership($plan['path']);
+            $entries[$plan['template']][] = ['type' => 'plan', 'assessment' => $assessment, 'ownership' => $ownership, ...$plan];
+            $templateOwnership[$plan['template']] = $ownership;
             ++$assessmentCounts[$assessment['status']];
+            ++$ownershipCounts[$ownership];
+            foreach ($assessment['views'] as $view) {
+                ++$viewCounts[$view];
+            }
             if ($assessment['unavailable']) {
                 ++$assessmentCounts['unavailable'];
             }
@@ -46,9 +56,13 @@ final class ContextualEscapingHtmlReport
             }
         }
         foreach ($diagnostics as $diagnostic) {
-            $entries[$diagnostic['template']][] = ['type' => 'diagnostic', ...$diagnostic];
+            $ownership = $this->classifyOwnership($diagnostic['path']);
+            $entries[$diagnostic['template']][] = ['type' => 'diagnostic', 'ownership' => $ownership, ...$diagnostic];
+            $templateOwnership[$diagnostic['template']] = $ownership;
+            ++$viewCounts['action'];
+            ++$ownershipCounts[$ownership];
         }
-        ksort($entries);
+        uksort($entries, static fn (string $left, string $right): int => [$templateOwnership[$left], $left] <=> [$templateOwnership[$right], $right]);
         ksort($operations);
 
         $navigationEntries = [];
@@ -58,6 +72,7 @@ final class ContextualEscapingHtmlReport
             $navigationEntries[$template] = [
                 'id' => $id,
                 'count' => \count($templateEntries),
+                'ownership' => $templateOwnership[$template],
             ];
             $findings = '';
             $path = null;
@@ -113,18 +128,26 @@ a { color: var(--accent); }
 h1 { margin: 0 0 6px; font-size: 28px; }
 .meta { color: var(--muted); }
 .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-.metric { min-width: 130px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
+.metric { min-width: 130px; padding: 10px 14px; color: var(--text); text-align: left; font: inherit; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
+button.metric { cursor: pointer; }
+button.metric:hover, button.metric:focus-visible { color: var(--accent); border-color: var(--accent); }
 .metric strong { display: block; font-size: 20px; }
 .guide { max-width: 1500px; margin: 20px auto 0; padding: 0 32px; }
 .guide > div { padding: 14px 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
 .guide p { margin: 5px 0 0; color: var(--muted); }
 .guide strong { color: var(--text); }
-.controls { display: grid; grid-template-columns: minmax(240px, 1fr) 240px 210px; gap: 12px; padding: 16px 32px; position: sticky; top: 0; z-index: 3; background: color-mix(in srgb, var(--panel) 94%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); }
+.view-tabs { display: flex; flex-wrap: wrap; gap: 7px; padding: 14px 32px 0; position: sticky; top: 0; z-index: 4; background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(10px); }
+.view-tab { padding: 7px 11px; color: var(--muted); font: inherit; font-weight: 650; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); cursor: pointer; }
+.view-tab[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+.view-tab .view-count { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.controls { display: grid; grid-template-columns: minmax(240px, 1fr) 220px 220px 210px; gap: 12px; padding: 12px 32px 16px; position: sticky; top: 49px; z-index: 3; background: color-mix(in srgb, var(--panel) 94%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); }
 input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text); }
 .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; max-width: 1500px; margin: 0 auto; padding: 24px 32px 60px; }
-.navigation { position: sticky; top: 86px; max-height: calc(100vh - 110px); overflow: auto; align-self: start; }
+.navigation { position: sticky; top: 128px; max-height: calc(100vh - 152px); overflow: auto; align-self: start; }
 .navigation-tools { display: flex; gap: 6px; margin-bottom: 8px; }
 .navigation-tools button { flex: 1; padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text); cursor: pointer; }
+.nav-group + .nav-group { margin-top: 16px; }
+.nav-group-title { display: block; margin: 0 7px 5px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .navigation-tree a { display: flex; justify-content: space-between; gap: 10px; padding: 5px 7px; color: var(--text); text-decoration: none; border-radius: 5px; }
 .navigation-tree a:hover { background: var(--panel); color: var(--accent); }
 .navigation-tree details > div { margin-left: 17px; padding-left: 7px; border-left: 1px solid var(--border); }
@@ -143,7 +166,7 @@ input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--border);
 .nav-directory[open] > summary .tree-chevron { transform: rotate(90deg); }
 .nav-directory[open] > summary .tree-folder-closed { display: none; }
 .nav-directory[open] > summary .tree-folder-open { display: block; }
-.template { margin-bottom: 22px; scroll-margin-top: 90px; }
+.template { margin-bottom: 22px; scroll-margin-top: 128px; }
 .template > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
 h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .source-link { white-space: nowrap; }
@@ -162,13 +185,17 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .diagnostic .status { color: var(--warn); background: var(--warn-bg); }
 .operation { background: var(--bg); border: 1px solid var(--border); }
 .capability { color: var(--accent); background: var(--accent-bg); }
-.plan-label, .current { color: var(--muted); }
-.guidance { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
-.guidance strong { display: block; margin-bottom: 2px; }
-.guidance span { color: var(--muted); }
-.current-escapes { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 10px; }
-.current-escape { display: flex; align-items: baseline; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); }
-.current-escape small { color: var(--muted); }
+.ownership { color: var(--muted); background: var(--bg); border: 1px solid var(--border); }
+.guidance, .context-reason { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
+.guidance strong, .context-reason strong { display: block; margin-bottom: 2px; }
+.guidance span, .context-reason span { color: var(--muted); }
+.pipeline-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
+.pipeline { min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.pipeline > strong { display: block; margin-bottom: 7px; }
+.pipeline-steps, .current-escapes { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.pipeline-arrow { color: var(--muted); }
+.current-escape { display: flex; align-items: baseline; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); }
+.current-escape small, .pipeline-empty { color: var(--muted); }
 .line { margin-left: auto; color: var(--muted); }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .expression { display: block; padding: 9px 11px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; background: var(--bg); }
@@ -185,7 +212,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .limitations code { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .empty { padding: 40px; text-align: center; color: var(--muted); }
 [hidden] { display: none !important; }
-@media (max-width: 850px) { .controls { grid-template-columns: 1fr; position: static; } .layout { grid-template-columns: 1fr; padding: 18px; } nav { position: static; max-height: 260px; } .top { padding: 24px 18px; } .guide { padding: 0 18px; } }
+@media (max-width: 850px) { .view-tabs, .controls { position: static; padding-left: 18px; padding-right: 18px; } .controls { grid-template-columns: 1fr; } .pipeline-comparison { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; padding: 18px; } nav { position: static; max-height: 260px; } .top { padding: 24px 18px; } .guide { padding: 0 18px; } }
 </style>
 </head>
 <body>
@@ -201,18 +228,26 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <div class="summary">
 <div class="metric"><strong>{$summary['templates']}</strong>templates</div>
 <div class="metric"><strong>{$summary['output_sites']}</strong>output sites</div>
-<div class="metric"><strong>{$assessmentCounts['correct']}</strong>current plan matches</div>
-<div class="metric"><strong>{$assessmentCounts['partial']}</strong>outer protection present</div>
-<div class="metric"><strong>{$assessmentCounts['review']}</strong>findings to review</div>
-<div class="metric"><strong>{$assessmentCounts['unsafe']}</strong>unsafe today</div>
-<div class="metric"><strong>{$assessmentCounts['unavailable']}</strong>pipelines unavailable</div>
-<div class="metric"><strong>{$summary['diagnostics']}</strong>diagnostics</div>
+<button class="metric" type="button" data-summary-status="correct"><strong>{$assessmentCounts['correct']}</strong>current plan matches</button>
+<button class="metric" type="button" data-summary-status="partial"><strong>{$assessmentCounts['partial']}</strong>outer protection present</button>
+<button class="metric" type="button" data-summary-status="review"><strong>{$assessmentCounts['review']}</strong>findings to review</button>
+<button class="metric" type="button" data-summary-status="unsafe"><strong>{$assessmentCounts['unsafe']}</strong>unsafe today</button>
+<button class="metric" type="button" data-summary-status="unavailable"><strong>{$assessmentCounts['unavailable']}</strong>pipelines unavailable</button>
+<button class="metric" type="button" data-summary-status="diagnostic"><strong>{$summary['diagnostics']}</strong>diagnostics</button>
 </div>
 </header>
-<section class="guide"><div><strong>How to use this report</strong><p>This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Outer HTML protection present” means quoted-attribute breakout is prevented, but inner URL, JavaScript, or CSS handling may still be missing. Findings marked for review may be intrinsically safe expressions or output transformed by a custom lexer or component; check their runtime safety contract separately. “Pipeline unavailable” means current Twig has no built-in filter for every required operation. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
+<section class="guide"><div><strong>How to use this report</strong><p>The default view contains findings that need action now. Use the other views to review trust contracts, plan for future Twig support, or inspect findings with no urgent action. This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Outer HTML protection present” means quoted-attribute breakout is prevented, but inner URL, JavaScript, or CSS handling may still be missing. Findings marked for review may be intrinsically safe expressions or output transformed by a custom lexer or component; check their runtime safety contract separately. “Pipeline unavailable” means current Twig has no built-in filter for every required operation. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
+<div class="view-tabs" role="group" aria-label="Report view">
+<button class="view-tab" type="button" data-view="action" aria-pressed="true">Action now <span class="view-count">{$viewCounts['action']}</span></button>
+<button class="view-tab" type="button" data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">{$viewCounts['review']}</span></button>
+<button class="view-tab" type="button" data-view="future" aria-pressed="false">Future Twig support <span class="view-count">{$viewCounts['future']}</span></button>
+<button class="view-tab" type="button" data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">{$viewCounts['no-urgent']}</span></button>
+<button class="view-tab" type="button" data-view="all" aria-pressed="false">All <span class="view-count">{$viewCounts['all']}</span></button>
+</div>
 <div class="controls">
 <label><span hidden>Search</span><input id="search" type="search" placeholder="Filter templates, expressions, operations..."></label>
-<label><span hidden>Assessment</span><select id="status"><option value="">All assessments</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option></select></label>
+<label><span hidden>Ownership</span><select id="ownership"><option value="">Application and dependencies</option><option value="application">Application ({$ownershipCounts['application']})</option><option value="dependency">Dependencies ({$ownershipCounts['dependency']})</option></select></label>
+<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option></select></label>
 <label><span hidden>Operation</span><select id="operation"><option value="">All operations</option>{$operationOptions}</select></label>
 </div>
 <div class="layout">
@@ -225,18 +260,27 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 {$unsupported}
 <script>
 const search = document.querySelector('#search');
+const ownership = document.querySelector('#ownership');
 const status = document.querySelector('#status');
 const operation = document.querySelector('#operation');
+const viewTabs = [...document.querySelectorAll('.view-tab')];
 const findings = [...document.querySelectorAll('.finding')];
 const templates = [...document.querySelectorAll('.template')];
 const links = [...document.querySelectorAll('[data-template-link]')];
 const directories = [...document.querySelectorAll('.nav-directory')];
 const empty = document.querySelector('#empty');
+let activeView = 'action';
+function selectView(view) {
+    activeView = view;
+    for (const tab of viewTabs) tab.setAttribute('aria-pressed', String(tab.dataset.view === view));
+}
 function filterReport() {
     const query = search.value.trim().toLowerCase();
     let visible = 0;
     for (const finding of findings) {
-        const matches = (!query || finding.dataset.search.includes(query))
+        const matches = ('all' === activeView || finding.dataset.views.split(' ').includes(activeView))
+            && (!query || finding.dataset.search.includes(query))
+            && (!ownership.value || finding.dataset.ownership === ownership.value)
             && (!status.value || finding.dataset.assessments.split(' ').includes(status.value))
             && (!operation.value || finding.dataset.operations.split(' ').includes(operation.value));
         finding.hidden = !matches;
@@ -249,12 +293,23 @@ function filterReport() {
         if (link) link.hidden = hidden;
     }
     for (const directory of [...directories].reverse()) directory.hidden = !directory.querySelector('a:not([hidden])');
-    if (query || status.value || operation.value) for (const directory of directories) directory.open = !directory.hidden;
+    if (query || ownership.value || status.value || operation.value) for (const directory of directories) directory.open = !directory.hidden;
     empty.hidden = 0 !== visible;
 }
-for (const control of [search, status, operation]) control.addEventListener('input', filterReport);
+for (const control of [search, ownership, status, operation]) control.addEventListener('input', filterReport);
+for (const tab of viewTabs) tab.addEventListener('click', () => {
+    selectView(tab.dataset.view);
+    status.value = '';
+    filterReport();
+});
+for (const metric of document.querySelectorAll('[data-summary-status]')) metric.addEventListener('click', () => {
+    selectView('all');
+    status.value = metric.dataset.summaryStatus;
+    filterReport();
+});
 document.querySelector('#expand-all').addEventListener('click', () => directories.forEach((directory) => directory.open = true));
 document.querySelector('#collapse-all').addEventListener('click', () => directories.forEach((directory) => directory.open = false));
+filterReport();
 </script>
 </body>
 </html>
@@ -270,16 +325,19 @@ HTML;
     }
 
     /**
-     * @param array<string, array{id: string, count: int}> $entries
+     * @param array<string, array{id: string, count: int, ownership: 'application'|'dependency'}> $entries
      */
     private function renderNavigation(array $entries): string
     {
-        $tree = ['count' => 0, 'directories' => [], 'files' => []];
+        $trees = [
+            'application' => ['count' => 0, 'directories' => [], 'files' => []],
+            'dependency' => ['count' => 0, 'directories' => [], 'files' => []],
+        ];
         foreach ($entries as $template => $entry) {
             $parts = explode('/', $template);
             $file = array_pop($parts);
-            $tree['count'] += $entry['count'];
-            $node = &$tree;
+            $trees[$entry['ownership']]['count'] += $entry['count'];
+            $node = &$trees[$entry['ownership']];
             foreach ($parts as $part) {
                 $node['directories'][$part] ??= ['count' => 0, 'directories' => [], 'files' => []];
                 $node['directories'][$part]['count'] += $entry['count'];
@@ -289,13 +347,25 @@ HTML;
             unset($node);
         }
 
-        return $this->renderNavigationNode($tree);
+        $html = '';
+        foreach ($trees as $ownership => $tree) {
+            if (!$tree['count']) {
+                continue;
+            }
+            $html .= \sprintf(
+                '<div class="nav-group"><strong class="nav-group-title">%s</strong>%s</div>',
+                'application' === $ownership ? 'Application' : 'Dependencies',
+                $this->renderNavigationNode($tree),
+            );
+        }
+
+        return $html;
     }
 
     private function renderNavigationNode(array $node): string
     {
         ksort($node['directories']);
-        ksort($node['files']);
+        uasort($node['files'], static fn (array $left, array $right): int => [$left['ownership'], $left['template']] <=> [$right['ownership'], $right['template']]);
         $html = '';
         foreach ($node['directories'] as $name => $directory) {
             $html .= \sprintf(
@@ -330,7 +400,7 @@ HTML;
     /**
      * @param array{operations: list<string>, current: string, correct: bool, expression?: string|null, plain_variable?: bool, current_safe?: list<string>} $plan
      *
-     * @return array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}
+     * @return array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}
      */
     private function assessPlan(array $plan): array
     {
@@ -404,11 +474,20 @@ HTML;
         if ($unavailable) {
             $assessments[] = 'unavailable';
         }
+        $views = match ($status) {
+            'unsafe' => ['action'],
+            'review' => ['review'],
+            'correct', 'partial' => ['no-urgent'],
+        };
+        if ($unavailable) {
+            $views[] = 'future';
+        }
 
         return [
             'status' => $status,
             'label' => $label,
             'assessments' => $assessments,
+            'views' => $views,
             'unavailable' => $unavailable,
             'title' => $title,
             'guidance' => $guidance,
@@ -433,14 +512,10 @@ HTML;
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}} $plan
+     * @param array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, ownership: 'application'|'dependency', type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}} $plan
      */
     private function renderPlan(array $plan): string
     {
-        $operations = '';
-        foreach ($plan['operations'] as $operation) {
-            $operations .= \sprintf('<span class="badge operation">%s</span>', $this->escape($operation));
-        }
         $assessment = $plan['assessment'];
         $capabilities = '';
         if (\in_array('url-trust', $assessment['assessments'], true)) {
@@ -450,12 +525,15 @@ HTML;
             $capabilities .= '<span class="badge capability">Pipeline unavailable in current Twig</span>';
         }
         $source = $this->renderSourceExcerpt($plan['path'], $plan['line'], $plan['expression']);
-        $currentEscapes = $this->renderCurrentEscapes($plan['current_escapes']);
         $current = 'none' === $plan['current'] && $plan['current_safe'] ? 'safe for '.implode(', ', $plan['current_safe']) : $plan['current'];
+        $contextReason = $this->describeContextReason($plan['context']);
         $search = strtolower(implode(' ', [
             $plan['template'],
             $plan['line'],
+            $plan['ownership'],
             implode(' ', $plan['operations']),
+            $plan['context'],
+            $contextReason,
             $current,
             implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
             $assessment['label'],
@@ -465,17 +543,20 @@ HTML;
         ]));
 
         return \sprintf(
-            '<article class="finding %s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span>%s<span class="plan-label">Required future pipeline:</span>%s<span class="current">Current Twig: %s</span><span class="line">Line %d</span></div>%s<p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
+            '<article class="finding %s" data-views="%s" data-ownership="%s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span>%s<span class="line">Line %d</span></div><div class="pipeline-comparison">%s%s</div><p class="context-reason"><strong>Why this is required</strong><span>%s</span></p><p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
             $assessment['status'],
+            $this->escape(implode(' ', $assessment['views'])),
+            $plan['ownership'],
             $this->escape(implode(' ', $assessment['assessments'])),
             $this->escape(implode(' ', $plan['operations'])),
             $this->escape($search),
             $this->escape($assessment['label']),
+            $this->escape('application' === $plan['ownership'] ? 'Application' : 'Dependency'),
             $capabilities,
-            $operations,
-            $this->escape($current),
             $plan['line'],
-            $currentEscapes,
+            $this->renderCurrentPipeline($plan['current_escapes'], $current),
+            $this->renderRequiredPipeline($plan['operations']),
+            $this->escape($contextReason),
             $this->escape($assessment['title']),
             $this->escape($assessment['guidance']),
             $source,
@@ -485,13 +566,13 @@ HTML;
     /**
      * @param list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}> $escapes
      */
-    private function renderCurrentEscapes(array $escapes): string
+    private function renderCurrentPipeline(array $escapes, string $current): string
     {
-        if (!$escapes || (1 === \count($escapes) && 'whole' === $escapes[0]['scope'])) {
-            return '';
+        if (!$escapes) {
+            return \sprintf('<div class="pipeline"><strong>Current Twig</strong><span class="pipeline-empty">%s</span></div>', $this->escape('none' === $current ? 'No recognized current escaping' : $current));
         }
 
-        $html = '<div class="current-escapes">';
+        $html = '<div class="pipeline"><strong>Current Twig</strong><div class="current-escapes">';
         foreach ($escapes as $escape) {
             $scope = 'whole' === $escape['scope'] ? 'Whole output' : 'Nested <code>'.$this->escape($escape['expression']).'</code>';
             $html .= \sprintf(
@@ -502,20 +583,93 @@ HTML;
             );
         }
 
-        return $html.'</div>';
+        return $html.'</div></div>';
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, code: string, message: string, type: string} $diagnostic
+     * @param list<string> $operations
+     */
+    private function renderRequiredPipeline(array $operations): string
+    {
+        $steps = '';
+        foreach ($operations as $index => $operation) {
+            if (0 < $index) {
+                $steps .= '<span class="pipeline-arrow" aria-hidden="true">→</span>';
+            }
+            $steps .= \sprintf('<span class="badge operation">%s</span>', $this->escape($operation));
+        }
+
+        return '<div class="pipeline"><strong>Required pipeline</strong><div class="pipeline-steps">'.$steps.'</div></div>';
+    }
+
+    private function describeContextReason(string $context): string
+    {
+        return match ($context) {
+            'HTML text' => 'The expression is rendered as HTML text.',
+            'JavaScript Code' => 'The expression is rendered as executable JavaScript code.',
+            'JavaScript DoubleQuotedString' => 'The expression is inside a double-quoted JavaScript string.',
+            'JavaScript SingleQuotedString' => 'The expression is inside a single-quoted JavaScript string.',
+            'JavaScript TemplateString' => 'The expression is inside a JavaScript template string.',
+            'JavaScript RegExp' => 'The expression is inside a JavaScript regular expression.',
+            'CSS Value' => 'The expression is in a CSS declaration value.',
+            'CSS DoubleQuotedString' => 'The expression is inside a double-quoted CSS string.',
+            'CSS SingleQuotedString' => 'The expression is inside a single-quoted CSS string.',
+            'CSS UrlStart' => 'The expression starts a CSS url() value.',
+            'CSS UrlUnquoted' => 'The expression is inside an unquoted CSS url() value.',
+            'CSS UrlDoubleQuoted' => 'The expression is inside a double-quoted CSS url() value.',
+            'CSS UrlSingleQuoted' => 'The expression is inside a single-quoted CSS url() value.',
+            'srcset candidate start' => 'The expression starts a new srcset candidate.',
+            default => $this->describeAttributeContextReason($context),
+        };
+    }
+
+    private function describeAttributeContextReason(string $context): string
+    {
+        if (!preg_match('/^(?:a|an) (double-quoted|single-quoted|unquoted) (.+) attribute$/', $context, $matches)) {
+            return 'The expression is rendered in '.$context.'.';
+        }
+
+        $attribute = 'unquoted' === $matches[1] ? 'an unquoted HTML attribute' : 'a '.$matches[1].' HTML attribute';
+
+        return match ($matches[2]) {
+            'plain HTML' => 'The expression is inside '.$attribute.'.',
+            'URL start' => 'The expression starts a URL in '.$attribute.'.',
+            'URL path' => 'The expression is in the path of a URL in '.$attribute.'.',
+            'URL query or fragment' => 'The expression is in the query or fragment of a URL in '.$attribute.'.',
+            default => 'The expression is rendered in '.$context.'.',
+        };
+    }
+
+    /**
+     * @return 'application'|'dependency'
+     */
+    private function classifyOwnership(?string $path): string
+    {
+        if (null === $path) {
+            return 'application';
+        }
+
+        $projectDirectory = str_replace('\\', '/', realpath($this->projectDirectory) ?: $this->projectDirectory);
+        $path = str_replace('\\', '/', realpath($path) ?: $path);
+        $inProject = $path === $projectDirectory || str_starts_with($path, rtrim($projectDirectory, '/').'/');
+        $inVendor = str_starts_with($path, rtrim($projectDirectory, '/').'/vendor/');
+
+        return $inProject && !$inVendor ? 'application' : 'dependency';
+    }
+
+    /**
+     * @param array{template: string, path: string|null, line: int, code: string, message: string, ownership: 'application'|'dependency', type: string} $diagnostic
      */
     private function renderDiagnostic(array $diagnostic): string
     {
-        $search = strtolower(implode(' ', [$diagnostic['template'], $diagnostic['line'], $diagnostic['code'], $diagnostic['message']]));
+        $search = strtolower(implode(' ', [$diagnostic['template'], $diagnostic['line'], $diagnostic['ownership'], $diagnostic['code'], $diagnostic['message']]));
 
         return \sprintf(
-            '<article class="finding diagnostic" data-assessments="diagnostic" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="line">Line %d</span></div><p class="message">%s</p>%s</article>',
+            '<article class="finding diagnostic" data-views="action" data-ownership="%s" data-assessments="diagnostic" data-operations="" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span><span class="line">Line %d</span></div><p class="message">%s</p>%s</article>',
+            $diagnostic['ownership'],
             $this->escape($search),
             $this->escape($diagnostic['code']),
+            $this->escape('application' === $diagnostic['ownership'] ? 'Application' : 'Dependency'),
             $diagnostic['line'],
             $this->escape($diagnostic['message']),
             $this->renderSourceExcerpt($diagnostic['path'], $diagnostic['line'], null),

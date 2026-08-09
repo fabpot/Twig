@@ -29,6 +29,7 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ {'path': path, 'closing': '}}'}.path }}",
                 'correct-attribute.html.twig:1 [EscapePlan] HtmlAttribute [Current: html_attr, correct]: {{ value }}',
                 'correct-javascript.html.twig:1 [EscapePlan] JavaScriptString [Current: js, correct]: {{ value }}',
+                '@Dependency/link.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ dependency_url }}',
                 "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
                 'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
                 'legacy-safe.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ legacy_safe() }}',
@@ -39,24 +40,36 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 15 templates and 14 output sites; found 12 contextual escape plans (2 correct, 10 incorrect) and 3 diagnostics.',
+                'Analyzed 16 templates and 15 output sites; found 13 contextual escape plans (2 correct, 11 incorrect) and 3 diagnostics.',
                 'HTML report: '.$report,
             ], $output);
             $html = file_get_contents($report);
             $this->assertStringContainsString('<input id="search"', $html);
-            $this->assertStringContainsString('<strong>6</strong>outer protection present', $html);
+            $this->assertStringContainsString('<strong>7</strong>outer protection present', $html);
             $this->assertStringContainsString('<strong>2</strong>findings to review', $html);
             $this->assertStringContainsString('<strong>2</strong>unsafe today', $html);
-            $this->assertStringContainsString('<strong>5</strong>pipelines unavailable', $html);
+            $this->assertStringContainsString('<strong>6</strong>pipelines unavailable', $html);
+            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">3</span>', $html);
+            $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">2</span>', $html);
+            $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">6</span>', $html);
+            $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">9</span>', $html);
+            $this->assertStringContainsString('data-summary-status="unsafe"', $html);
+            $this->assertStringContainsString('<option value="application">Application (13)</option>', $html);
+            $this->assertStringContainsString('<option value="dependency">Dependencies (1)</option>', $html);
             $this->assertStringContainsString('data-assessments="partial url-trust unavailable"', $html);
             $this->assertStringContainsString('data-assessments="review"', $html);
             $this->assertStringContainsString('data-assessments="unsafe"', $html);
             $this->assertStringContainsString('Outer HTML protection present', $html);
             $this->assertStringContainsString('Check the extension runtime safety contract', $html);
             $this->assertStringContainsString('Trusted by current Twig', $html);
-            $this->assertStringContainsString('Current Twig: safe for all', $html);
+            $this->assertStringContainsString('<strong>Current Twig</strong><span class="pipeline-empty">safe for all</span>', $html);
             $this->assertStringContainsString('<strong>Whole output:</strong><code>html</code><small>automatic</small>', $html);
             $this->assertStringContainsString('<strong>Nested <code>path</code>:</strong><code>url</code><small>explicit</small>', $html);
+            $this->assertStringContainsString('<strong>Required pipeline</strong><div class="pipeline-steps"><span class="badge operation">JavaScriptString</span>', $html);
+            $this->assertStringContainsString('<strong>Why this is required</strong><span>The expression is inside a single-quoted JavaScript string.</span>', $html);
+            $this->assertStringContainsString('data-ownership="application"', $html);
+            $this->assertStringContainsString('data-ownership="dependency"', $html);
+            $this->assertLessThan(strpos($html, '@Dependency/link.html.twig'), strpos($html, 'contextual.html.twig'));
             $this->assertStringContainsString('URL validation or trusted metadata needed', $html);
             $this->assertStringNotContainsString('review-static.html.twig', $html);
             $this->assertStringContainsString('Never apply <code>e(\'url\')</code> to a complete URL.', $html);

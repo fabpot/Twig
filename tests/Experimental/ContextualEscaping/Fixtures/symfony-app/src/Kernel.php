@@ -154,7 +154,9 @@ class Kernel
 
     public function boot(): void
     {
-        $twig = new Environment(new FilesystemLoader(\dirname(__DIR__).'/templates'), [
+        $loader = new FilesystemLoader(\dirname(__DIR__).'/templates');
+        $loader->addPath(\dirname(__DIR__).'/vendor/dependency/templates', 'Dependency');
+        $twig = new Environment($loader, [
             'autoescape' => static fn (string $name): string|false => match ($name) {
                 'correct-attribute.html.twig' => 'html_attr',
                 'correct-javascript.html.twig' => 'js',
