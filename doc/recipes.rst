@@ -134,7 +134,13 @@ including a configured built-in escaping strategy, is consumed by the
 contextual parser. Incompatible output contexts remain a diagnostic; fixed
 hexadecimal CSS colors are recognized as context-preserving values. A
 multi-operation plan describes the pipeline required by future contextual
-escaping; not every operation has a corresponding Twig filter today.
+escaping; not every operation has a corresponding Twig filter today. A
+fail-closed callable analyzer recognizes the exact Symfony UX component,
+Asset and Routing callables without loading those packages directly.
+Components produce HTML fragments, while ``asset()``, ``path()`` and ``url()``
+produce URLs. Functions with the same names but different callables receive no
+special trust. Macro analysis also accepts the legacy internal template
+variable nodes used by earlier Twig versions in the audited application.
 
 Each run also writes a self-contained interactive report to
 ``var/contextual-escaping.html`` in the application. Its default ``Action now``
@@ -157,7 +163,10 @@ and expressions trusted by current Twig safety metadata. The latter display
 their current safe strategies so that broad legacy contracts such as ``all``
 can be reviewed in the inferred context. Additional badges identify pipelines
 unavailable in current Twig and complete URLs that need validation
-or trusted ``url`` metadata. Actionable guidance explains when to keep a
+or trusted ``url`` metadata. Diagnostics distinguish ambiguous template
+contexts, template errors and analyzer limitations and provide
+category-specific remediation.
+Actionable guidance explains when to keep a
 quoted attribute, encode only a URL component, validate a complete URL in PHP
 or declare a trusted URL-producing callable. The report does not require a web
 server or external assets.
@@ -180,6 +189,19 @@ Unsupported node diagnostics are grouped by node type instead of being printed
 for every occurrence. The script exits with status 1 when diagnostics or
 incorrect escaping strategies are reported and status 2 when the application
 cannot be booted.
+
+Every run also writes a stable machine-readable report to
+``var/contextual-escaping.json``. Finding identifiers include the owning
+template, source line, required operations and current strategy, or the
+diagnostic code and message. To establish a CI baseline, copy that file to a
+tracked location and pass it to later runs::
+
+    php vendor/bin/lint_contextual_escaping.php . --baseline=config/contextual-escaping-baseline.json
+
+Baseline mode reports new, resolved and unchanged finding counts. Existing and
+resolved findings do not fail the command; it exits with status 1 only when a
+new finding appears. The current JSON report is still refreshed after each run,
+so intentional changes can be reviewed and promoted to the tracked baseline.
 
 ``lintDirectory()`` recursively analyzes files ending in ``.html.twig`` and
 returns an iterable keyed by their logical loader names. The directory must be
