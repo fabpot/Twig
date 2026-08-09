@@ -24,10 +24,10 @@ final class ContextualEscapingHtmlReport
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                       $diagnostics
-     * @param array<string, int>                                                                                                                                                                               $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                             $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                     $diagnostics
+     * @param array<string, int>                                                                                                                                                                                                                                                                                             $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                           $summary
      */
     public function write(array $plans, array $diagnostics, array $unsupportedNodes, array $summary): void
     {
@@ -166,6 +166,9 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .guidance { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
 .guidance strong { display: block; margin-bottom: 2px; }
 .guidance span { color: var(--muted); }
+.current-escapes { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 10px; }
+.current-escape { display: flex; align-items: baseline; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); }
+.current-escape small { color: var(--muted); }
 .line { margin-left: auto; color: var(--muted); }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .expression { display: block; padding: 9px 11px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; background: var(--bg); }
@@ -430,7 +433,7 @@ HTML;
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}} $plan
+     * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}} $plan
      */
     private function renderPlan(array $plan): string
     {
@@ -447,12 +450,14 @@ HTML;
             $capabilities .= '<span class="badge capability">Pipeline unavailable in current Twig</span>';
         }
         $source = $this->renderSourceExcerpt($plan['path'], $plan['line'], $plan['expression']);
+        $currentEscapes = $this->renderCurrentEscapes($plan['current_escapes']);
         $current = 'none' === $plan['current'] && $plan['current_safe'] ? 'safe for '.implode(', ', $plan['current_safe']) : $plan['current'];
         $search = strtolower(implode(' ', [
             $plan['template'],
             $plan['line'],
             implode(' ', $plan['operations']),
             $current,
+            implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
             $assessment['label'],
             $assessment['title'],
             $assessment['guidance'],
@@ -460,7 +465,7 @@ HTML;
         ]));
 
         return \sprintf(
-            '<article class="finding %s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span>%s<span class="plan-label">Required future pipeline:</span>%s<span class="current">Current Twig: %s</span><span class="line">Line %d</span></div><p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
+            '<article class="finding %s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span>%s<span class="plan-label">Required future pipeline:</span>%s<span class="current">Current Twig: %s</span><span class="line">Line %d</span></div>%s<p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
             $assessment['status'],
             $this->escape(implode(' ', $assessment['assessments'])),
             $this->escape(implode(' ', $plan['operations'])),
@@ -470,10 +475,34 @@ HTML;
             $operations,
             $this->escape($current),
             $plan['line'],
+            $currentEscapes,
             $this->escape($assessment['title']),
             $this->escape($assessment['guidance']),
             $source,
         );
+    }
+
+    /**
+     * @param list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}> $escapes
+     */
+    private function renderCurrentEscapes(array $escapes): string
+    {
+        if (!$escapes || (1 === \count($escapes) && 'whole' === $escapes[0]['scope'])) {
+            return '';
+        }
+
+        $html = '<div class="current-escapes">';
+        foreach ($escapes as $escape) {
+            $scope = 'whole' === $escape['scope'] ? 'Whole output' : 'Nested <code>'.$this->escape($escape['expression']).'</code>';
+            $html .= \sprintf(
+                '<span class="current-escape"><strong>%s:</strong><code>%s</code><small>%s</small></span>',
+                $scope,
+                $this->escape($escape['strategy']),
+                $escape['automatic'] ? 'automatic' : 'explicit',
+            );
+        }
+
+        return $html.'</div>';
     }
 
     /**

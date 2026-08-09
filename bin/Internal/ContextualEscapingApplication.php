@@ -16,10 +16,13 @@ use Twig\Error\LoaderError;
 use Twig\Node\Expression\AbstractExpression;
 use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
+use Twig\Node\Expression\FunctionExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
 use Twig\Node\Expression\Variable\ContextVariable;
+use Twig\Node\Node;
 use Twig\Node\PrintNode;
 use Twig\TwigFilter;
+use Twig\TwigFunction;
 
 final class ContextualEscapingApplication
 {
@@ -55,6 +58,7 @@ final class ContextualEscapingApplication
                 $expression = $this->getExpressionSnippet($node);
                 $expressionNode = $node->getNode('expr');
                 $currentStrategies = $this->getCurrentEscapingStrategies($expressionNode);
+                $currentEscapes = $this->getCurrentEscapes($expressionNode);
                 $currentSafety = $this->currentSafetyAnalyzer->analyze($expressionNode);
                 $currentIsCorrect = $this->currentEscapingIsCorrect($operationCases, $currentStrategies);
                 $current = $currentStrategies ? implode(' | ', $currentStrategies) : 'none';
@@ -78,6 +82,7 @@ final class ContextualEscapingApplication
                     'expression' => $expression,
                     'plain_variable' => $expressionNode instanceof ContextVariable,
                     'current_safe' => $currentSafety['safe'],
+                    'current_escapes' => $currentEscapes,
                 ];
                 printf(
                     "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",
@@ -206,6 +211,71 @@ final class ContextualEscapingApplication
         }
 
         return [];
+    }
+
+    /**
+     * @return list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>
+     */
+    private function getCurrentEscapes(AbstractExpression $expression): array
+    {
+        $escapes = [];
+        $seen = [];
+        $this->collectCurrentEscapes($expression, true, $escapes, $seen);
+
+        return $escapes;
+    }
+
+    /**
+     * @param list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}> $escapes
+     * @param array<int, true>                                                                            $seen
+     */
+    private function collectCurrentEscapes(Node $node, bool $wholeOutput, array &$escapes, array &$seen): void
+    {
+        $id = spl_object_id($node);
+        if (isset($seen[$id])) {
+            return;
+        }
+        $seen[$id] = true;
+
+        if ($node instanceof FilterExpression) {
+            $filter = $node->getAttribute('twig_callable');
+            if ($filter instanceof TwigFilter && \in_array($filter->getName(), ['e', 'escape'], true)) {
+                $arguments = $node->getNode('arguments');
+                $strategy = 'html';
+                if (\count($arguments)) {
+                    $strategyNode = $arguments->getNode(0);
+                    $strategy = $strategyNode instanceof ConstantExpression && \is_string($strategyNode->getAttribute('value')) ? $strategyNode->getAttribute('value') : 'dynamic';
+                }
+                $input = $node->getNode('node');
+                $escapes[] = [
+                    'strategy' => $strategy,
+                    'scope' => $wholeOutput ? 'whole' : 'nested',
+                    'expression' => $input instanceof AbstractExpression ? $this->describeExpression($input) : 'expression',
+                    'automatic' => $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value'),
+                ];
+                if ($input instanceof Node) {
+                    $this->collectCurrentEscapes($input, false, $escapes, $seen);
+                }
+
+                return;
+            }
+        }
+
+        foreach ($node as $child) {
+            $this->collectCurrentEscapes($child, false, $escapes, $seen);
+        }
+    }
+
+    private function describeExpression(AbstractExpression $expression): string
+    {
+        if ($expression instanceof ContextVariable) {
+            return $expression->getAttribute('name');
+        }
+        if ($expression instanceof FunctionExpression && $expression->getAttribute('twig_callable') instanceof TwigFunction) {
+            return $expression->getAttribute('twig_callable')->getName().'()';
+        }
+
+        return 'expression';
     }
 
     /**

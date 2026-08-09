@@ -32,20 +32,21 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
                 'invalid.html.twig:1 [UnsupportedOutputContext] Output expressions in CSS property-name contexts are not supported.',
                 'legacy-safe.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ legacy_safe() }}',
+                "nested-escaping.html.twig:1 [EscapePlan] JavaScriptString [Current: html, incorrect]: {{ base ~ '?next=' ~ path|e('url') }}",
                 'nested/tree.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
                 'transformed-component.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <twig:Link href="{{',
                 'transformed-output.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: <app:output />',
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 14 templates and 13 output sites; found 11 contextual escape plans (2 correct, 9 incorrect) and 3 diagnostics.',
+                'Analyzed 15 templates and 14 output sites; found 12 contextual escape plans (2 correct, 10 incorrect) and 3 diagnostics.',
                 'HTML report: '.$report,
             ], $output);
             $html = file_get_contents($report);
             $this->assertStringContainsString('<input id="search"', $html);
             $this->assertStringContainsString('<strong>6</strong>outer protection present', $html);
             $this->assertStringContainsString('<strong>2</strong>findings to review', $html);
-            $this->assertStringContainsString('<strong>1</strong>unsafe today', $html);
+            $this->assertStringContainsString('<strong>2</strong>unsafe today', $html);
             $this->assertStringContainsString('<strong>5</strong>pipelines unavailable', $html);
             $this->assertStringContainsString('data-assessments="partial url-trust unavailable"', $html);
             $this->assertStringContainsString('data-assessments="review"', $html);
@@ -54,6 +55,8 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             $this->assertStringContainsString('Check the extension runtime safety contract', $html);
             $this->assertStringContainsString('Trusted by current Twig', $html);
             $this->assertStringContainsString('Current Twig: safe for all', $html);
+            $this->assertStringContainsString('<strong>Whole output:</strong><code>html</code><small>automatic</small>', $html);
+            $this->assertStringContainsString('<strong>Nested <code>path</code>:</strong><code>url</code><small>explicit</small>', $html);
             $this->assertStringContainsString('URL validation or trusted metadata needed', $html);
             $this->assertStringNotContainsString('review-static.html.twig', $html);
             $this->assertStringContainsString('Never apply <code>e(\'url\')</code> to a complete URL.', $html);
