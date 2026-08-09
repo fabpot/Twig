@@ -149,6 +149,14 @@ inheritance or an include. Adjacent report entries do not imply a direct
 template reference. When a custom lexer rewrites a template before parsing,
 the report shows the corresponding original source line from disk.
 
+Without depending on Symfony UX, the linter recognizes supported shapes of its
+``ComponentNode`` and ``PropsNode`` classes. Props declarations preserve the
+current context because they emit no output. Components are treated as complete
+HTML fragments and are accepted only in HTML text; rendering one in an
+attribute, JavaScript, CSS or another nested context is rejected. An unknown
+node shape remains unsupported so a Symfony UX change cannot silently weaken
+the analysis.
+
 Unsupported node diagnostics are grouped by node type instead of being printed
 for every occurrence. The script exits with status 1 when diagnostics or
 incorrect escaping strategies are reported and status 2 when the application
