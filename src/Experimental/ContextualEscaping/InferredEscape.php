@@ -18,10 +18,16 @@ use Twig\Node\PrintNode;
  */
 final class InferredEscape
 {
+    /**
+     * @param list<string> $provenance
+     * @param list<string> $staticOutputs
+     */
     public function __construct(
         private PrintNode $node,
         private EscapePlan $plan,
         private string $context = 'an unknown context',
+        private array $provenance = [],
+        private array $staticOutputs = [],
     ) {
     }
 
@@ -38,5 +44,21 @@ final class InferredEscape
     public function getContext(): string
     {
         return $this->context;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getProvenance(): array
+    {
+        return $this->provenance;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getStaticOutputs(): array
+    {
+        return $this->staticOutputs;
     }
 }

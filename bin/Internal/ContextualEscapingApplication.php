@@ -42,6 +42,7 @@ final class ContextualEscapingApplication
         $templateCount = 0;
         $outputSites = [];
         $escapePlans = [];
+        $staticPlans = [];
         $diagnostics = [];
         $unsupportedNodes = [];
         $planRows = [];
@@ -66,11 +67,20 @@ final class ContextualEscapingApplication
                 $planKey = $siteKey."\0".implode("\0", $operations);
                 $outputSites[$siteKey] = true;
 
-                if ([] === $operations || ([EscapeOperation::HtmlText] === $operationCases && $currentIsCorrect) || isset($escapePlans[$planKey])) {
+                $provenance = $inferredEscape->getProvenance();
+                if ([] === $operations) {
+                    if (!$provenance || isset($staticPlans[$planKey])) {
+                        continue;
+                    }
+                    $staticPlans[$planKey] = true;
+                } elseif ([EscapeOperation::HtmlText] === $operationCases && $currentIsCorrect) {
                     continue;
+                } elseif (isset($escapePlans[$planKey])) {
+                    continue;
+                } else {
+                    $escapePlans[$planKey] = $currentIsCorrect;
                 }
 
-                $escapePlans[$planKey] = $currentIsCorrect;
                 $sourcePath = $node->getSourceContext()?->getPath();
                 $planRows[] = [
                     'template' => $templateName,
@@ -84,16 +94,20 @@ final class ContextualEscapingApplication
                     'plain_variable' => $expressionNode instanceof ContextVariable,
                     'current_safe' => $currentSafety['safe'],
                     'current_escapes' => $currentEscapes,
+                    'provenance' => $provenance,
+                    'static_output_count' => \count($inferredEscape->getStaticOutputs()),
                 ];
-                printf(
-                    "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",
-                    $templateName,
-                    $node->getTemplateLine(),
-                    implode(' -> ', $operations),
-                    $current,
-                    $currentIsCorrect ? 'correct' : 'incorrect',
-                    null === $expression ? '' : ': '.$expression,
-                );
+                if ($operations) {
+                    printf(
+                        "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",
+                        $templateName,
+                        $node->getTemplateLine(),
+                        implode(' -> ', $operations),
+                        $current,
+                        $currentIsCorrect ? 'correct' : 'incorrect',
+                        null === $expression ? '' : ': '.$expression,
+                    );
+                }
             }
 
             foreach ($result->getDiagnostics() as $diagnostic) {
@@ -148,6 +162,10 @@ final class ContextualEscapingApplication
             \count($diagnostics),
             1 === \count($diagnostics) ? '' : 's',
         );
+
+        if ($staticPlans) {
+            printf("Proved %d finite static output site%s safe.\n", \count($staticPlans), 1 === \count($staticPlans) ? '' : 's');
+        }
 
         $this->htmlReport->write($planRows, $diagnosticRows, $unsupportedNodes, [
             'templates' => $templateCount,

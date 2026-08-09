@@ -100,11 +100,15 @@ final class ContextualEscapingAnalyzer
     /** @var array<string, ContentTypeSet> */
     private array $contentTypes = [];
 
+    /** @var array<string, FiniteStaticValueSet> */
+    private array $staticValues = [];
+
     public function __construct(
         private HtmlContextParser $contextParser,
         private ?TemplateResolverInterface $templateResolver = null,
         private ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null,
         private ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null,
+        private ?StaticExpressionAnalyzer $staticExpressionAnalyzer = null,
     ) {
     }
 
@@ -120,6 +124,7 @@ final class ContextualEscapingAnalyzer
         $this->activeBlocks = [];
         $this->activeMacros = [];
         $this->contentTypes = [];
+        $this->staticValues = [];
 
         $context = $this->analyzeModule($module, new HtmlContext(), $module);
 
@@ -436,8 +441,10 @@ final class ContextualEscapingAnalyzer
         $this->blockStack[] = ['name' => $name, 'definitions' => $definitions, 'index' => $index];
         $this->moduleStack[] = $definition['module'];
         $contentTypes = $this->contentTypes;
+        $staticValues = $this->staticValues;
         $context = $this->analyzeNode($definition['node']->getNode('body'), $context);
         $this->contentTypes = $contentTypes;
+        $this->staticValues = $staticValues;
         array_pop($this->moduleStack);
         array_pop($this->blockStack);
         unset($this->activeBlocks[$key]);
@@ -492,13 +499,16 @@ final class ContextualEscapingAnalyzer
         }
 
         $contentTypes = $this->contentTypes;
+        $staticValues = $this->staticValues;
         if ($node->hasNode('variables')) {
             $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
         } elseif ($node->getAttribute('only')) {
             $this->contentTypes = [];
+            $this->staticValues = [];
         }
         $context = $this->analyzeModule($module, $context, $node);
         $this->contentTypes = $contentTypes;
+        $this->staticValues = $staticValues;
 
         return $context;
     }
@@ -511,13 +521,16 @@ final class ContextualEscapingAnalyzer
         }
 
         $contentTypes = $this->contentTypes;
+        $staticValues = $this->staticValues;
         if ($node->hasNode('variables')) {
             $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
         } elseif ($node->getAttribute('only')) {
             $this->contentTypes = [];
+            $this->staticValues = [];
         }
         $context = $this->analyzeModule($this->embeddedModules[$index], $context, $node);
         $this->contentTypes = $contentTypes;
+        $this->staticValues = $staticValues;
 
         return $context;
     }
@@ -572,9 +585,12 @@ final class ContextualEscapingAnalyzer
         $this->compositionScopes[] = $macroScope;
         $this->moduleStack[] = $module;
         $contentTypes = $this->contentTypes;
+        $staticValues = $this->staticValues;
         $this->contentTypes = $this->getMacroArgumentContentTypes($node, $macro);
+        $this->staticValues = $this->getMacroArgumentStaticValues($node, $macro);
         $context = $this->analyzeNode($macro->getNode('body'), $context);
         $this->contentTypes = $contentTypes;
+        $this->staticValues = $staticValues;
         array_pop($this->moduleStack);
         array_pop($this->compositionScopes);
         unset($this->activeMacros[$key]);
@@ -615,6 +631,38 @@ final class ContextualEscapingAnalyzer
         }
 
         return $contentTypes;
+    }
+
+    /**
+     * @return array<string, FiniteStaticValueSet>
+     */
+    private function getMacroArgumentStaticValues(MacroReferenceExpression $reference, MacroNode $macro): array
+    {
+        $macroArguments = $macro->getNode('arguments');
+        $referenceArguments = $reference->getNode('arguments');
+        if (!$macroArguments instanceof ArrayExpression || !$referenceArguments instanceof ArrayExpression) {
+            return [];
+        }
+
+        $parameters = [];
+        foreach ($macroArguments->getKeyValuePairs() as $pair) {
+            $name = $pair['key']->getAttribute('name');
+            if (\is_string($name)) {
+                $parameters[] = $name;
+            }
+        }
+
+        $staticValues = [];
+        foreach ($referenceArguments->getKeyValuePairs() as $index => $pair) {
+            $name = $pair['key']->getAttribute('name');
+            $name = \is_string($name) ? $name : ($parameters[$index] ?? null);
+            if (null === $name || !$pair['value'] instanceof AbstractExpression || null === $value = $this->staticExpressionAnalyzer?->analyze($pair['value'], $this->staticValues)) {
+                continue;
+            }
+            $staticValues['context:'.$name] = $value->withProvenance($name);
+        }
+
+        return $staticValues;
     }
 
     private function findMacroNode(Node $node, string $name): ?MacroNode
@@ -659,6 +707,18 @@ final class ContextualEscapingAnalyzer
             return $this->contextParser->consume($context, $expression->getAttribute('value'));
         }
 
+        if (null !== $staticValues = $this->staticExpressionAnalyzer?->analyze($expression, $this->staticValues)) {
+            $outputs = $this->renderStaticValues($staticValues);
+            if (null !== $outputs) {
+                $outputContext = $this->analyzeStaticOutputs($outputs, $context, $node);
+                if (HtmlState::Dead !== $outputContext->getState()) {
+                    $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe(), $staticValues->getProvenance(), $outputs));
+                }
+
+                return $outputContext;
+            }
+        }
+
         $context = $context->nudgeAttributeValue()->resolveJavaScriptPendingTokenForInterpolation()->resolveCssPendingTokenForInterpolation();
         $contentTypes = $this->inferContentTypes($expression, $context);
         if (null !== $explicitAutoescape && false !== $explicitAutoescape && $contentTypes->isPlainText()) {
@@ -694,6 +754,65 @@ final class ContextualEscapingAnalyzer
             );
 
         return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $operations, true));
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private function renderStaticValues(FiniteStaticValueSet $staticValues): ?array
+    {
+        $outputs = [];
+        foreach ($staticValues->getValues() as $value) {
+            if (null === $value || false === $value) {
+                $value = '';
+            } elseif (true === $value) {
+                $value = '1';
+            } elseif (\is_string($value) || \is_int($value) || \is_float($value)) {
+                $value = (string) $value;
+            } else {
+                return null;
+            }
+            $outputs[$value] = true;
+        }
+
+        return array_keys($outputs);
+    }
+
+    /**
+     * @param non-empty-list<string> $outputs
+     */
+    private function analyzeStaticOutputs(array $outputs, HtmlContext $context, PrintNode $origin): HtmlContext
+    {
+        $contexts = [];
+        foreach ($outputs as $output) {
+            $contexts[] = $this->contextParser->consume($context, $output);
+        }
+
+        $joined = $contexts[0];
+        foreach (\array_slice($contexts, 1) as $outputContext) {
+            if (null === $joined = $joined->merge($outputContext)) {
+                return $this->staticOutputsPreserveContext($outputs, $context) ? $context : $this->joinContexts($contexts, $origin, 'The finite static outputs end in incompatible contexts');
+            }
+        }
+
+        return $joined;
+    }
+
+    /**
+     * @param non-empty-list<string> $outputs
+     */
+    private function staticOutputsPreserveContext(array $outputs, HtmlContext $context): bool
+    {
+        if (CssState::Value !== $context->getCssContext()?->getState()) {
+            return false;
+        }
+        foreach ($outputs as $output) {
+            if (!preg_match('/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/iD', $output)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function analyzeConstantOutput(AbstractExpression $expression, HtmlContext $context, PrintNode $origin): HtmlContext
@@ -766,6 +885,7 @@ final class ContextualEscapingAnalyzer
             }
 
             $contentTypes = $this->contentTypes;
+            $staticValues = $this->staticValues;
             $withContextNode = $arguments->hasNode(2) ? $arguments->getNode(2) : ($arguments->hasNode('with_context') ? $arguments->getNode('with_context') : null);
             $withContext = !($withContextNode instanceof ConstantExpression) || false !== $withContextNode->getAttribute('value');
             if ($arguments->hasNode(1)) {
@@ -774,9 +894,11 @@ final class ContextualEscapingAnalyzer
                 $this->applyVariableContentTypes($arguments->getNode('variables'), !$withContext);
             } elseif (!$withContext) {
                 $this->contentTypes = [];
+                $this->staticValues = [];
             }
             $context = $this->analyzeModule($module, $context, $origin);
             $this->contentTypes = $contentTypes;
+            $this->staticValues = $staticValues;
 
             return $context;
         }
@@ -1250,21 +1372,28 @@ final class ContextualEscapingAnalyzer
     {
         $branches = [];
         $contentTypeBranches = [];
+        $staticValueBranches = [];
         $inputContentTypes = $this->contentTypes;
+        $inputStaticValues = $this->staticValues;
         $tests = $node->getNode('tests');
         for ($i = 1; $i < \count($tests); $i += 2) {
             $this->contentTypes = $inputContentTypes;
+            $this->staticValues = $inputStaticValues;
             if ($tests->hasNode((string) $i)) {
                 $branches[] = $this->analyzeNode($tests->getNode((string) $i), $context, $explicitAutoescape);
             } else {
                 $branches[] = $context;
             }
             $contentTypeBranches[] = $this->contentTypes;
+            $staticValueBranches[] = $this->staticValues;
         }
         $this->contentTypes = $inputContentTypes;
+        $this->staticValues = $inputStaticValues;
         $branches[] = $node->hasNode('else') ? $this->analyzeNode($node->getNode('else'), $context, $explicitAutoescape) : $context;
         $contentTypeBranches[] = $this->contentTypes;
+        $staticValueBranches[] = $this->staticValues;
         $this->contentTypes = $this->joinContentTypeMaps($contentTypeBranches);
+        $this->staticValues = $this->joinStaticValueMaps($staticValueBranches);
 
         return $this->joinContexts($branches, $node, 'The branches of this "if" tag end in incompatible contexts');
     }
@@ -1272,10 +1401,15 @@ final class ContextualEscapingAnalyzer
     private function analyzeFor(ForNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
         $inputContentTypes = $this->contentTypes;
+        $inputStaticValues = $this->staticValues;
+        $this->removeAssignedStaticValues($node->getNode('key_target'));
+        $this->removeAssignedStaticValues($node->getNode('value_target'));
         $bodyContext = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
         $bodyContentTypes = $this->contentTypes;
+        $bodyStaticValues = $this->staticValues;
         if (HtmlState::Dead === $bodyContext->getState()) {
             $this->contentTypes = $inputContentTypes;
+            $this->staticValues = $inputStaticValues;
 
             return $bodyContext;
         }
@@ -1285,19 +1419,23 @@ final class ContextualEscapingAnalyzer
         if (!$input->equals($output)) {
             $this->addDiagnostic($node, DiagnosticCode::UnstableLoop, \sprintf('The "for" loop body changes the HTML context from %s to %s, so repeated iterations cannot be analyzed safely.', $input->describe(), $output->describe()));
             $this->contentTypes = $inputContentTypes;
+            $this->staticValues = $inputStaticValues;
 
             return $context->toDead();
         }
 
         if (!$node->hasNode('else')) {
             $this->contentTypes = $this->joinContentTypeMaps([$bodyContentTypes, $inputContentTypes]);
+            $this->staticValues = $this->joinStaticValueMaps([$bodyStaticValues, $inputStaticValues]);
 
             return $output;
         }
 
         $this->contentTypes = $inputContentTypes;
+        $this->staticValues = $inputStaticValues;
         $elseContext = $this->analyzeNode($node->getNode('else'), $context, $explicitAutoescape);
         $this->contentTypes = $this->joinContentTypeMaps([$bodyContentTypes, $this->contentTypes]);
+        $this->staticValues = $this->joinStaticValueMaps([$bodyStaticValues, $this->staticValues]);
 
         return $this->joinContexts([$output, $elseContext], $node, 'The body and "else" branch of this "for" tag end in incompatible contexts');
     }
@@ -1305,13 +1443,16 @@ final class ContextualEscapingAnalyzer
     private function analyzeWith(WithNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
         $contentTypes = $this->contentTypes;
+        $staticValues = $this->staticValues;
         if ($node->hasNode('variables')) {
             $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
         } elseif ($node->getAttribute('only')) {
             $this->contentTypes = [];
+            $this->staticValues = [];
         }
         $context = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
         $this->contentTypes = $contentTypes;
+        $this->staticValues = $staticValues;
 
         return $context;
     }
@@ -1321,19 +1462,23 @@ final class ContextualEscapingAnalyzer
         if (!$variables instanceof ArrayExpression) {
             if ($only) {
                 $this->contentTypes = [];
+                $this->staticValues = [];
             }
 
             return;
         }
         $inputContentTypes = $this->contentTypes;
+        $inputStaticValues = $this->staticValues;
         $outputContentTypes = $only ? [] : $inputContentTypes;
+        $outputStaticValues = $only ? [] : $inputStaticValues;
         for ($i = 0; $i < \count($variables); $i += 2) {
             $name = $variables->getNode($i);
             $value = $variables->getNode(1 + $i);
             if (!$name instanceof ConstantExpression || !\is_string($name->getAttribute('value')) || !$value instanceof AbstractExpression) {
                 continue;
             }
-            $key = 'context:'.$name->getAttribute('value');
+            $name = $name->getAttribute('value');
+            $key = 'context:'.$name;
             $this->contentTypes = $inputContentTypes;
             $valueContentTypes = $this->inferContentTypes($value, new HtmlContext());
             if ($valueContentTypes->isPlainText()) {
@@ -1341,8 +1486,14 @@ final class ContextualEscapingAnalyzer
             } else {
                 $outputContentTypes[$key] = $valueContentTypes;
             }
+            if (null === $staticValue = $this->staticExpressionAnalyzer?->analyze($value, $inputStaticValues)) {
+                unset($outputStaticValues[$key]);
+            } else {
+                $outputStaticValues[$key] = $staticValue->withProvenance($name);
+            }
         }
         $this->contentTypes = $outputContentTypes;
+        $this->staticValues = $outputStaticValues;
     }
 
     private function analyzeAutoEscape(AutoEscapeNode $node, HtmlContext $context): HtmlContext
@@ -1357,9 +1508,17 @@ final class ContextualEscapingAnalyzer
         if ($values instanceof CaptureNode) {
             $contentTypes = $this->analyzeCapturedContent($values, $explicitAutoescape);
             $this->assignContentTypes($names, [$contentTypes]);
+            $this->assignStaticValues($names, []);
 
             return $context;
         }
+
+        $finiteValues = [];
+        foreach ($values as $value) {
+            $finiteValues[] = $value instanceof AbstractExpression ? $this->staticExpressionAnalyzer?->analyze($value, $this->staticValues) : null;
+        }
+        $this->assignStaticValues($names, $finiteValues);
+
         if ($node->getAttribute('safe')) {
             $contentTypes = new ContentTypeSet([ContentType::Html]);
             if ($values instanceof ConstantExpression && \is_string($values->getAttribute('value'))) {
@@ -1420,6 +1579,38 @@ final class ContextualEscapingAnalyzer
         }
     }
 
+    private function removeAssignedStaticValues(Node $target): void
+    {
+        if ($target->hasAttribute('name') && \is_string($target->getAttribute('name'))) {
+            unset($this->staticValues['context:'.$target->getAttribute('name')]);
+        }
+        foreach ($target as $child) {
+            $this->removeAssignedStaticValues($child);
+        }
+    }
+
+    /**
+     * @param list<FiniteStaticValueSet|null> $values
+     */
+    private function assignStaticValues(Node $names, array $values): void
+    {
+        if (!$names instanceof Nodes) {
+            $names = new Nodes([$names]);
+        }
+        foreach ($names as $index => $name) {
+            if (!$name instanceof ContextVariable && !$name instanceof LocalVariable) {
+                continue;
+            }
+            $key = $this->getVariableKey($name);
+            $value = $values[$index] ?? null;
+            if (null === $value) {
+                unset($this->staticValues[$key]);
+            } else {
+                $this->staticValues[$key] = $value->withProvenance($name instanceof ContextVariable ? $name->getAttribute('name') : 'local value');
+            }
+        }
+    }
+
     private function getVariableKey(ContextVariable|LocalVariable $variable): string
     {
         return $variable instanceof LocalVariable ? 'local:'.spl_object_id($variable) : 'context:'.$variable->getAttribute('name');
@@ -1442,6 +1633,27 @@ final class ContextualEscapingAnalyzer
             } else {
                 $joined[$name] = $contentTypes;
             }
+        }
+
+        return $joined;
+    }
+
+    /**
+     * @param non-empty-list<array<string, FiniteStaticValueSet>> $maps
+     *
+     * @return array<string, FiniteStaticValueSet>
+     */
+    private function joinStaticValueMaps(array $maps): array
+    {
+        $joined = $maps[0];
+        foreach ($joined as $name => $values) {
+            foreach (\array_slice($maps, 1) as $map) {
+                if (!isset($map[$name]) || null === $values = $values->merge($map[$name])) {
+                    unset($joined[$name]);
+                    continue 2;
+                }
+            }
+            $joined[$name] = $values;
         }
 
         return $joined;

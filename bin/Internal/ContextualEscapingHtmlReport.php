@@ -25,17 +25,17 @@ final class ContextualEscapingHtmlReport
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                      $diagnostics
-     * @param array<string, int>                                                                                                                                                                                                                                                                                                              $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                            $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                                                                          $diagnostics
+     * @param array<string, int>                                                                                                                                                                                                                                                                                                                                                                  $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                                                                                $summary
      */
     public function write(array $plans, array $diagnostics, array $unsupportedNodes, array $summary): void
     {
         $entries = [];
         $operations = [];
         $templateOwnership = [];
-        $assessmentCounts = ['correct' => 0, 'partial' => 0, 'review' => 0, 'unsafe' => 0, 'unavailable' => 0];
+        $assessmentCounts = ['proven' => 0, 'correct' => 0, 'partial' => 0, 'review' => 0, 'unsafe' => 0, 'unavailable' => 0];
         $viewCounts = ['action' => 0, 'review' => 0, 'future' => 0, 'no-urgent' => 0, 'all' => \count($plans) + \count($diagnostics)];
         $ownershipCounts = ['application' => 0, 'dependency' => 0];
         foreach ($plans as $plan) {
@@ -171,14 +171,14 @@ input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--border);
 h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .source-link { white-space: nowrap; }
 .finding { margin: 8px 0; padding: 13px 15px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; background: var(--panel); }
-.finding.correct { border-left-color: var(--good); }
+.finding.proven, .finding.correct { border-left-color: var(--good); }
 .finding.partial { border-left-color: var(--warn); }
 .finding.review { border-left-color: var(--accent); }
 .finding.unsafe { border-left-color: var(--bad); }
 .finding.diagnostic { border-left-color: var(--warn); }
 .finding-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 650; }
-.correct .status { color: var(--good); background: var(--good-bg); }
+.proven .status, .correct .status { color: var(--good); background: var(--good-bg); }
 .partial .status { color: var(--warn); background: var(--warn-bg); }
 .review .status { color: var(--accent); background: var(--accent-bg); }
 .unsafe .status { color: var(--bad); background: var(--bad-bg); }
@@ -186,9 +186,11 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .operation { background: var(--bg); border: 1px solid var(--border); }
 .capability { color: var(--accent); background: var(--accent-bg); }
 .ownership { color: var(--muted); background: var(--bg); border: 1px solid var(--border); }
-.guidance, .context-reason { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
-.guidance strong, .context-reason strong { display: block; margin-bottom: 2px; }
+.guidance, .context-reason, .provenance { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
+.guidance strong, .context-reason strong, .provenance > strong { display: block; margin-bottom: 2px; }
 .guidance span, .context-reason span { color: var(--muted); }
+.provenance ol { margin: 6px 0 0; padding-left: 24px; color: var(--muted); }
+.provenance li + li { margin-top: 2px; }
 .pipeline-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
 .pipeline { min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .pipeline > strong { display: block; margin-bottom: 7px; }
@@ -228,6 +230,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <div class="summary">
 <div class="metric"><strong>{$summary['templates']}</strong>templates</div>
 <div class="metric"><strong>{$summary['output_sites']}</strong>output sites</div>
+<button class="metric" type="button" data-summary-status="proven"><strong>{$assessmentCounts['proven']}</strong>statically proven safe</button>
 <button class="metric" type="button" data-summary-status="correct"><strong>{$assessmentCounts['correct']}</strong>current plan matches</button>
 <button class="metric" type="button" data-summary-status="partial"><strong>{$assessmentCounts['partial']}</strong>outer protection present</button>
 <button class="metric" type="button" data-summary-status="review"><strong>{$assessmentCounts['review']}</strong>findings to review</button>
@@ -236,7 +239,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <button class="metric" type="button" data-summary-status="diagnostic"><strong>{$summary['diagnostics']}</strong>diagnostics</button>
 </div>
 </header>
-<section class="guide"><div><strong>How to use this report</strong><p>The default view contains findings that need action now. Use the other views to review trust contracts, plan for future Twig support, or inspect findings with no urgent action. This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Outer HTML protection present” means quoted-attribute breakout is prevented, but inner URL, JavaScript, or CSS handling may still be missing. Findings marked for review may be intrinsically safe expressions or output transformed by a custom lexer or component; check their runtime safety contract separately. “Pipeline unavailable” means current Twig has no built-in filter for every required operation. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
+<section class="guide"><div><strong>How to use this report</strong><p>The default view contains findings that need action now. Use the other views to review trust contracts, plan for future Twig support, or inspect findings with no urgent action. Statically proven findings show every assignment and selection step that restricts an expression to a finite set of template-defined outputs. This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Outer HTML protection present” means quoted-attribute breakout is prevented, but inner URL, JavaScript, or CSS handling may still be missing. Findings marked for review may be intrinsically safe expressions or output transformed by a custom lexer or component; check their runtime safety contract separately. “Pipeline unavailable” means current Twig has no built-in filter for every required operation. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
 <div class="view-tabs" role="group" aria-label="Report view">
 <button class="view-tab" type="button" data-view="action" aria-pressed="true">Action now <span class="view-count">{$viewCounts['action']}</span></button>
 <button class="view-tab" type="button" data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">{$viewCounts['review']}</span></button>
@@ -247,7 +250,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <div class="controls">
 <label><span hidden>Search</span><input id="search" type="search" placeholder="Filter templates, expressions, operations..."></label>
 <label><span hidden>Ownership</span><select id="ownership"><option value="">Application and dependencies</option><option value="application">Application ({$ownershipCounts['application']})</option><option value="dependency">Dependencies ({$ownershipCounts['dependency']})</option></select></label>
-<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option></select></label>
+<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="proven">Statically proven safe</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option></select></label>
 <label><span hidden>Operation</span><select id="operation"><option value="">All operations</option>{$operationOptions}</select></label>
 </div>
 <div class="layout">
@@ -398,13 +401,25 @@ HTML;
     }
 
     /**
-     * @param array{operations: list<string>, current: string, correct: bool, expression?: string|null, plain_variable?: bool, current_safe?: list<string>} $plan
+     * @param array{operations: list<string>, current: string, correct: bool, expression?: string|null, plain_variable?: bool, current_safe?: list<string>, provenance?: list<string>} $plan
      *
-     * @return array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}
+     * @return array{status: 'proven'|'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}
      */
     private function assessPlan(array $plan): array
     {
         $operations = $plan['operations'];
+        if (!$operations && ($plan['provenance'] ?? [])) {
+            return [
+                'status' => 'proven',
+                'label' => 'Statically proven safe',
+                'assessments' => ['proven'],
+                'views' => ['no-urgent'],
+                'unavailable' => false,
+                'title' => 'No escaping operation is required',
+                'guidance' => 'Every possible output comes from template-defined constants and was analyzed directly in its output context.',
+            ];
+        }
+
         $outerOperation = $operations[array_key_last($operations)];
         $outerProtected = $this->hasOuterProtection($outerOperation, $plan['current']);
         $unavailable = !$plan['correct'] && [] !== array_intersect($operations, [
@@ -512,7 +527,7 @@ HTML;
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, ownership: 'application'|'dependency', type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}} $plan
+     * @param array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, ownership: 'application'|'dependency', type: string, assessment: array{status: 'proven'|'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, views: list<'action'|'review'|'future'|'no-urgent'>, unavailable: bool, title: string, guidance: string}} $plan
      */
     private function renderPlan(array $plan): string
     {
@@ -526,7 +541,10 @@ HTML;
         }
         $source = $this->renderSourceExcerpt($plan['path'], $plan['line'], $plan['expression']);
         $current = 'none' === $plan['current'] && $plan['current_safe'] ? 'safe for '.implode(', ', $plan['current_safe']) : $plan['current'];
-        $contextReason = $this->describeContextReason($plan['context']);
+        $contextReason = 'proven' === $assessment['status']
+            ? \sprintf('%d possible static output%s %s analyzed directly in %s.', $plan['static_output_count'], 1 === $plan['static_output_count'] ? '' : 's', 1 === $plan['static_output_count'] ? 'was' : 'were', $plan['context'])
+            : $this->describeContextReason($plan['context']);
+        $provenance = $this->renderProvenance($plan['provenance']);
         $search = strtolower(implode(' ', [
             $plan['template'],
             $plan['line'],
@@ -534,6 +552,7 @@ HTML;
             implode(' ', $plan['operations']),
             $plan['context'],
             $contextReason,
+            implode(' ', $plan['provenance']),
             $current,
             implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
             $assessment['label'],
@@ -543,7 +562,7 @@ HTML;
         ]));
 
         return \sprintf(
-            '<article class="finding %s" data-views="%s" data-ownership="%s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span>%s<span class="line">Line %d</span></div><div class="pipeline-comparison">%s%s</div><p class="context-reason"><strong>Why this is required</strong><span>%s</span></p><p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
+            '<article class="finding %s" data-views="%s" data-ownership="%s" data-assessments="%s" data-operations="%s" data-search="%s"><div class="finding-head"><span class="badge status">%s</span><span class="badge ownership">%s</span>%s<span class="line">Line %d</span></div><div class="pipeline-comparison">%s%s</div><p class="context-reason"><strong>%s</strong><span>%s</span></p>%s<p class="guidance"><strong>%s</strong><span>%s</span></p>%s</article>',
             $assessment['status'],
             $this->escape(implode(' ', $assessment['views'])),
             $plan['ownership'],
@@ -556,7 +575,9 @@ HTML;
             $plan['line'],
             $this->renderCurrentPipeline($plan['current_escapes'], $current),
             $this->renderRequiredPipeline($plan['operations']),
+            'proven' === $assessment['status'] ? 'Why no escaping is required' : 'Why this is required',
             $this->escape($contextReason),
+            $provenance,
             $this->escape($assessment['title']),
             $this->escape($assessment['guidance']),
             $source,
@@ -591,6 +612,10 @@ HTML;
      */
     private function renderRequiredPipeline(array $operations): string
     {
+        if (!$operations) {
+            return '<div class="pipeline"><strong>Required pipeline</strong><span class="pipeline-empty">No escaping required</span></div>';
+        }
+
         $steps = '';
         foreach ($operations as $index => $operation) {
             if (0 < $index) {
@@ -600,6 +625,23 @@ HTML;
         }
 
         return '<div class="pipeline"><strong>Required pipeline</strong><div class="pipeline-steps">'.$steps.'</div></div>';
+    }
+
+    /**
+     * @param list<string> $provenance
+     */
+    private function renderProvenance(array $provenance): string
+    {
+        if (!$provenance) {
+            return '';
+        }
+
+        $steps = '';
+        foreach ($provenance as $step) {
+            $steps .= '<li><code>'.$this->escape($step).'</code></li>';
+        }
+
+        return '<div class="provenance"><strong>Value provenance</strong><ol>'.$steps.'</ol></div>';
     }
 
     private function describeContextReason(string $context): string

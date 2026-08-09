@@ -40,7 +40,8 @@ final class LintSymfonyApplicationScriptTest extends TestCase
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 16 templates and 15 output sites; found 13 contextual escape plans (2 correct, 11 incorrect) and 3 diagnostics.',
+                'Analyzed 17 templates and 16 output sites; found 13 contextual escape plans (2 correct, 11 incorrect) and 3 diagnostics.',
+                'Proved 1 finite static output site safe.',
                 'HTML report: '.$report,
             ], $output);
             $html = file_get_contents($report);
@@ -52,9 +53,9 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">3</span>', $html);
             $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">2</span>', $html);
             $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">6</span>', $html);
-            $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">9</span>', $html);
+            $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">10</span>', $html);
             $this->assertStringContainsString('data-summary-status="unsafe"', $html);
-            $this->assertStringContainsString('<option value="application">Application (13)</option>', $html);
+            $this->assertStringContainsString('<option value="application">Application (14)</option>', $html);
             $this->assertStringContainsString('<option value="dependency">Dependencies (1)</option>', $html);
             $this->assertStringContainsString('data-assessments="partial url-trust unavailable"', $html);
             $this->assertStringContainsString('data-assessments="review"', $html);
@@ -67,6 +68,10 @@ final class LintSymfonyApplicationScriptTest extends TestCase
             $this->assertStringContainsString('<strong>Nested <code>path</code>:</strong><code>url</code><small>explicit</small>', $html);
             $this->assertStringContainsString('<strong>Required pipeline</strong><div class="pipeline-steps"><span class="badge operation">JavaScriptString</span>', $html);
             $this->assertStringContainsString('<strong>Why this is required</strong><span>The expression is inside a single-quoted JavaScript string.</span>', $html);
+            $this->assertStringContainsString('<strong>1</strong>statically proven safe', $html);
+            $this->assertStringContainsString('<strong>Why no escaping is required</strong><span>2 possible static outputs were analyzed directly in CSS Value.</span>', $html);
+            $this->assertStringContainsString('<strong>Value provenance</strong><ol><li><code>color</code></li><li><code>random(colors)|first</code></li><li><code>random(colors)</code></li><li><code>colors</code></li><li><code>fixed local array</code></li></ol>', $html);
+            $this->assertStringContainsString('<strong>Required pipeline</strong><span class="pipeline-empty">No escaping required</span>', $html);
             $this->assertStringContainsString('data-ownership="application"', $html);
             $this->assertStringContainsString('data-ownership="dependency"', $html);
             $this->assertLessThan(strpos($html, '@Dependency/link.html.twig'), strpos($html, 'contextual.html.twig'));

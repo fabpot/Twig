@@ -44,6 +44,7 @@ final class ContextualEscapingLinter
                 new EnvironmentTemplateResolver($environment),
                 $currentSafetyAnalyzer,
                 $nodeAnalyzerRegistry,
+                new StaticExpressionAnalyzer($environment),
             ),
         );
     }

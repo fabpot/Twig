@@ -22,6 +22,7 @@ use Twig\Experimental\ContextualEscaping\ContextualEscapingLinter;
 use Twig\Experimental\ContextualEscaping\CssContextParser;
 use Twig\Experimental\ContextualEscaping\DiagnosticCode;
 use Twig\Experimental\ContextualEscaping\EscapeOperation;
+use Twig\Experimental\ContextualEscaping\FiniteStaticValueSet;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
@@ -230,6 +231,108 @@ class ContextualEscapingLinterTest extends TestCase
 
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($result));
+    }
+
+    public function testTracksFiniteStaticValuesThroughAssignments(): void
+    {
+        $result = $this->lint(<<<'TWIG'
+            <style>
+                {% set colors = [['#fff', '#000'], ['#abc', '#def']] %}
+                {% set color = random(colors) %}
+                {% set light = color|first %}
+                .example { color: {{ light }}; }
+            </style>
+            TWIG);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[]], $this->getPlans($result));
+        $inferredEscape = $result->getInferredEscapes()[0];
+        $this->assertSame(['#fff', '#abc'], $inferredEscape->getStaticOutputs());
+        $this->assertSame([
+            'light',
+            'color|first',
+            'color',
+            'random(colors)',
+            'colors',
+            'fixed local array',
+        ], $inferredEscape->getProvenance());
+        $this->assertSame('CSS Value', $inferredEscape->getContext());
+    }
+
+    /**
+     * @param list<string> $outputs
+     *
+     * @dataProvider provideFiniteStaticExpressions
+     */
+    #[DataProvider('provideFiniteStaticExpressions')]
+    public function testTracksFiniteStaticExpressions(string $assignment, array $outputs): void
+    {
+        $result = $this->lint('{% set values = [["a", "b"], ["c", "d"]] %}{% set selected = random(values) %}{% set value = '.$assignment.' %}{{ value }}');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[]], $this->getPlans($result));
+        $this->assertSame($outputs, $result->getInferredEscapes()[0]->getStaticOutputs());
+    }
+
+    public static function provideFiniteStaticExpressions(): iterable
+    {
+        yield 'constant index' => ['selected[1]', ['b', 'd']];
+        yield 'map lookup' => ['{"name": "mapped"}["name"]', ['mapped']];
+        yield 'last filter' => ['selected|last', ['b', 'd']];
+        yield 'conditional branches' => ['condition ? "yes" : "no"', ['yes', 'no']];
+        yield 'concatenation' => ['selected[0] ~ selected[1]', ['ab', 'ad', 'cb', 'cd']];
+        yield 'merged arrays' => ['random(values|merge([["e", "f"]]))|first', ['a', 'c', 'e']];
+    }
+
+    public function testAppliesConfiguredEscapingToFiniteStaticOutputs(): void
+    {
+        $result = $this->lint('{% set value = "<" %}{{ value }}');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[]], $this->getPlans($result));
+        $this->assertSame(['&lt;'], $result->getInferredEscapes()[0]->getStaticOutputs());
+    }
+
+    public function testMergesFiniteStaticAssignmentsAcrossBranches(): void
+    {
+        $result = $this->lint('<style>{% if condition %}{% set color = "#fff" %}{% else %}{% set color = "#000" %}{% endif %}.example { color: {{ color }}; }</style>');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[]], $this->getPlans($result));
+        $this->assertSame(['#fff', '#000'], $result->getInferredEscapes()[0]->getStaticOutputs());
+    }
+
+    public function testDropsFiniteStaticAssignmentWhenABranchIsDynamic(): void
+    {
+        $result = $this->lint('<style>{% if condition %}{% set color = "#fff" %}{% else %}{% set color = dynamic %}{% endif %}.example { color: {{ color }}; }</style>');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::CssValue]], $this->getPlans($result));
+    }
+
+    public function testRejectsFiniteStaticOutputsThatEndInDifferentContexts(): void
+    {
+        $result = $this->lint('<style>.example { color: {% set values = ["u", "x"] %}{{ random(values) }}; }</style>');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertSame([], $result->getInferredEscapes());
+    }
+
+    public function testDoesNotReuseAStaticValueShadowedByALoopTarget(): void
+    {
+        $result = $this->lint('<style>{% set color = "#fff" %}{% for color in colors %}.example { color: {{ color }}; }{% endfor %}</style>');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::CssValue]], $this->getPlans($result));
+    }
+
+    public function testLimitsFiniteStaticValues(): void
+    {
+        $values = implode(', ', array_map(static fn (int $value): string => '"'.$value.'"', range(0, FiniteStaticValueSet::MAX_VALUES)));
+        $result = $this->lint('{% set values = ['.$values.'] %}{{ random(values) }}');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
     }
 
     /**
