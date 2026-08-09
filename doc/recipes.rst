@@ -121,8 +121,8 @@ parsed template and whether it matches the inferred plan. The HTML report also
 shows nested escaping with its expression scope and whether it was explicit or
 automatic, because an inner strategy does not replace the strategy applied to
 the whole output. Missing automatic escaping is reported as ``none``. Ordinary
-``HtmlText`` plans remain hidden
-when the current ``html`` strategy is correct, but are reported when automatic
+``HtmlText`` plans remain hidden when the current ``html`` strategy is correct,
+but are reported when automatic
 escaping is disabled or otherwise missing. The linter reuses Twig's current
 safe-expression analysis, so output restricted to static constant branches
 requires no escaping while still updating the surrounding lexical context. A
@@ -130,16 +130,22 @@ multi-operation plan describes the pipeline required by future contextual
 escaping; not every operation has a corresponding Twig filter today.
 
 Each run also writes a self-contained interactive report to
-``var/contextual-escaping.html`` in the application. The HTML report includes
-a collapsible directory tree with folder and file icons, groups findings by
-template, links to source files and supports free-text, assessment and
-escape-operation filters. Every finding shows nearby source lines with the
-relevant expression highlighted and classifies its current protection as an
-exact match, outer protection only, needing review or unsafe today. Review
-findings cover source transformed by custom lexers or components and
-expressions trusted by current Twig safety metadata. The latter display their
-current safe strategies so that broad legacy contracts such as ``all`` can be
-reviewed in the inferred context. Additional badges identify pipelines
+``var/contextual-escaping.html`` in the application. Its default ``Action now``
+view contains unsafe findings and diagnostics. Separate views group trust
+contracts to review, operations that need future Twig support and findings with
+no urgent action. Summary cards activate their corresponding assessment
+filters. The report separates application and dependency templates in the
+navigation and provides an ownership filter in addition to free-text,
+assessment and escape-operation filters.
+
+Every finding shows the current and required pipelines side by side, explains
+why the output context requires the inferred operations and includes nearby
+source lines with the relevant expression highlighted. It classifies current
+protection as an exact match, outer protection only, needing review or unsafe
+today. Review findings cover source transformed by custom lexers or components
+and expressions trusted by current Twig safety metadata. The latter display
+their current safe strategies so that broad legacy contracts such as ``all``
+can be reviewed in the inferred context. Additional badges identify pipelines
 unavailable in current Twig and complete URLs that need validation
 or trusted ``url`` metadata. Actionable guidance explains when to keep a
 quoted attribute, encode only a URL component, validate a complete URL in PHP
