@@ -1766,6 +1766,45 @@ class ContextualEscapingLinterTest extends TestCase
         yield 'embed' => ['{% embed "base.html.twig" %}{% endembed %}'];
     }
 
+    public function testAnalyzesSupportedSymfonyUxNodes(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_props'));
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_component'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% ux_props %}<div>{% ux_component %}</div>{{ value }}', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
+
+    public function testRejectsSymfonyUxComponentsOutsideHtmlText(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_component'));
+
+        $result = $this->createLinter($environment)->lint(new Source('<div title="{% ux_component %}">', 'index.html.twig'));
+
+        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('produces a complete HTML fragment', $result->getDiagnostics()[0]->getMessage());
+    }
+
+    public function testRejectsUnsupportedSymfonyUxNodeShapes(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_invalid_component'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% ux_invalid_component %}', 'index.html.twig'));
+
+        $this->assertSame([DiagnosticCode::UnsupportedNode], $this->getDiagnosticCodes($result));
+    }
+
     public function testRejectsAnUnknownStatementNodeEvenWithoutAnOutputMarker(): void
     {
         $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
@@ -1832,6 +1871,29 @@ class ContextualEscapingLinterTest extends TestCase
     private function getPlans(AnalysisResult $result): array
     {
         return array_map(static fn ($inferredEscape) => $inferredEscape->getPlan()->getOperations(), $result->getInferredEscapes());
+    }
+}
+
+final class SymfonyUxNodeTokenParser extends AbstractTokenParser
+{
+    public function __construct(private string $tag)
+    {
+    }
+
+    public function parse(Token $token): Node
+    {
+        $this->parser->getStream()->expect(Token::BLOCK_END_TYPE);
+
+        return match ($this->tag) {
+            'ux_props' => new \Symfony\UX\TwigComponent\Twig\PropsNode($token->getLine()),
+            'ux_component' => new \Symfony\UX\TwigComponent\Twig\ComponentNode($token->getLine()),
+            'ux_invalid_component' => new \Symfony\UX\TwigComponent\Twig\ComponentNode($token->getLine(), false),
+        };
+    }
+
+    public function getTag(): string
+    {
+        return $this->tag;
     }
 }
 

@@ -104,6 +104,7 @@ final class ContextualEscapingAnalyzer
         private HtmlContextParser $contextParser,
         private ?TemplateResolverInterface $templateResolver = null,
         private ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null,
+        private ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null,
     ) {
     }
 
@@ -387,7 +388,7 @@ final class ContextualEscapingAnalyzer
             ImportNode::class, MacroDeclarationNode::class => $context,
             CaptureNode::class => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
             CheckSecurityCallNode::class, CheckSecurityNode::class, ConfigNode::class, DeprecatedNode::class, DoNode::class, FlushNode::class, TypesNode::class => $context,
-            default => $this->rejectUnknownNode($node, $context),
+            default => $this->analyzeRegisteredNode($node, $context),
         };
 
         if ($context->hasMetaRefreshConflict()) {
@@ -1478,6 +1479,24 @@ final class ContextualEscapingAnalyzer
         return $context->toDead();
     }
 
+    private function analyzeRegisteredNode(Node $node, HtmlContext $context): HtmlContext
+    {
+        $type = $this->nodeAnalyzerRegistry?->classify($node);
+        if (null === $type) {
+            return $this->rejectUnknownNode($node, $context);
+        }
+        if (ContextualEscapingNodeType::ContextPreserving === $type) {
+            return $context;
+        }
+        if (HtmlState::Text === $context->getState()) {
+            return $context;
+        }
+
+        $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('The "%s" node produces a complete HTML fragment, which cannot be rendered in %s.', $node::class, $context->describe()));
+
+        return $context->toDead();
+    }
+
     private function rejectUnknownNode(Node $node, HtmlContext $context): HtmlContext
     {
         $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
@@ -1652,7 +1671,9 @@ final class ContextualEscapingAnalyzer
                 return;
 
             default:
-                $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
+                if (null === $this->nodeAnalyzerRegistry?->classify($node)) {
+                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
+                }
         }
     }
 
