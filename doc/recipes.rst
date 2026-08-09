@@ -120,15 +120,24 @@ The ``Current`` field identifies the outer escaping strategy applied by the
 parsed template and whether it matches the inferred plan. Missing automatic
 escaping is reported as ``none``. Ordinary ``HtmlText`` plans remain hidden
 when the current ``html`` strategy is correct, but are reported when automatic
-escaping is disabled or otherwise missing.
+escaping is disabled or otherwise missing. A multi-operation plan describes
+the pipeline required by future contextual escaping; not every operation has
+a corresponding Twig filter today.
 
 Each run also writes a self-contained interactive report to
 ``var/contextual-escaping.html`` in the application. The HTML report includes
 a collapsible directory tree with folder and file icons, groups findings by
-template, links to source
-files and supports free-text, status and escape-operation filters. Every
-finding shows nearby source lines with the relevant expression highlighted.
-The report does not require a web server or external assets.
+template, links to source files and supports free-text, assessment and
+escape-operation filters. Every finding shows nearby source lines with the
+relevant expression highlighted and classifies its current protection as an
+exact match, outer protection only, needing review or unsafe today. Review
+findings cover intrinsically safe expressions and source transformed by custom
+lexers or components. Additional badges identify pipelines unavailable in
+current Twig and complete URLs that need validation
+or trusted ``url`` metadata. Actionable guidance explains when to keep a
+quoted attribute, encode only a URL component, validate a complete URL in PHP
+or declare a trusted URL-producing callable. The report does not require a web
+server or external assets.
 
 The report is flat and deduplicated. Every path identifies the template that
 contains the reported output site, even when that template was reached through
