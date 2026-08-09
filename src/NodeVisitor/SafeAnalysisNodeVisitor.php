@@ -67,6 +67,24 @@ final class SafeAnalysisNodeVisitor implements NodeVisitorInterface
         return [];
     }
 
+    public static function hasConstantOutput(Node $node): bool
+    {
+        if ($node instanceof ConstantExpression) {
+            return true;
+        }
+        if (!$node instanceof OperatorEscapeInterface) {
+            return false;
+        }
+
+        foreach ($node->getOperandNamesToEscape() as $name) {
+            if (!self::hasConstantOutput($node->getNode($name))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private function setSafe(Node $node, array $safe): void
     {
         $hash = spl_object_id($node);

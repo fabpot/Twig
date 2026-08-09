@@ -2,6 +2,7 @@
 
  * Add a script with terminal and interactive HTML reports to audit a Symfony application's templates with its configured Twig environment
  * Add directory auditing to the experimental contextual escaping linter
+ * Reuse current escaping safety analysis for constant-output contextual plans
  * Add an experimental contextual escaping linter API for deprecation-free templates with static composition, typed safe content, URL, JavaScript, CSS, meta refresh, and srcset contexts
  * Add the `Twig\Sandbox\SandboxInterface` interface and `Twig\Sandbox\Sandbox` class to render untrusted templates through a dedicated, always-sandboxed environment crafted for it
  * Add the `Twig\Extension\SandboxBridgeExtension` to render sandboxed templates from trusted templates with an explicit output escaping strategy

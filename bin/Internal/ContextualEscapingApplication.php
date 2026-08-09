@@ -30,6 +30,7 @@ final class ContextualEscapingApplication
         private Environment $twig,
         private string $templateDirectory,
         private ContextualEscapingHtmlReport $htmlReport,
+        private CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer,
     ) {
     }
 
@@ -43,7 +44,7 @@ final class ContextualEscapingApplication
         $planRows = [];
         $diagnosticRows = [];
 
-        foreach (ContextualEscapingLinter::create($this->twig)->lintDirectory($this->templateDirectory) as $name => $result) {
+        foreach (ContextualEscapingLinter::create($this->twig, $this->currentSafetyAnalyzer)->lintDirectory($this->templateDirectory) as $name => $result) {
             ++$templateCount;
 
             foreach ($result->getInferredEscapes() as $inferredEscape) {
@@ -54,6 +55,7 @@ final class ContextualEscapingApplication
                 $expression = $this->getExpressionSnippet($node);
                 $expressionNode = $node->getNode('expr');
                 $currentStrategies = $this->getCurrentEscapingStrategies($expressionNode);
+                $currentSafety = $this->currentSafetyAnalyzer->analyze($expressionNode);
                 $currentIsCorrect = $this->currentEscapingIsCorrect($operationCases, $currentStrategies);
                 $current = $currentStrategies ? implode(' | ', $currentStrategies) : 'none';
                 $siteKey = $templateName."\0".$node->getTemplateLine()."\0".($expression ?? '');
@@ -75,6 +77,7 @@ final class ContextualEscapingApplication
                     'correct' => $currentIsCorrect,
                     'expression' => $expression,
                     'plain_variable' => $expressionNode instanceof ContextVariable,
+                    'current_safe' => $currentSafety['safe'],
                 ];
                 printf(
                     "%s:%d [EscapePlan] %s [Current: %s, %s]%s\n",

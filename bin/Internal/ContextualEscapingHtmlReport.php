@@ -24,10 +24,10 @@ final class ContextualEscapingHtmlReport
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                           $diagnostics
-     * @param array<string, int>                                                                                                                                                   $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                 $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                       $diagnostics
+     * @param array<string, int>                                                                                                                                                                               $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                             $summary
      */
     public function write(array $plans, array $diagnostics, array $unsupportedNodes, array $summary): void
     {
@@ -325,7 +325,7 @@ HTML;
     }
 
     /**
-     * @param array{operations: list<string>, current: string, correct: bool, expression?: string|null, plain_variable?: bool} $plan
+     * @param array{operations: list<string>, current: string, correct: bool, expression?: string|null, plain_variable?: bool, current_safe?: list<string>} $plan
      *
      * @return array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}
      */
@@ -363,11 +363,16 @@ HTML;
             $label = 'Generated output to review';
             $title = 'Check the extension runtime safety contract';
             $guidance = 'A custom lexer or component transformed this source. Confirm that its runtime escapes untrusted values and declares accurate safe-content metadata; do not add a template filter blindly.';
+        } elseif ('none' === $plan['current'] && ($plan['current_safe'] ?? [])) {
+            $status = 'review';
+            $label = 'Trusted by current Twig';
+            $title = 'Verify the legacy safe-content contract';
+            $guidance = \sprintf('Current Twig considers this expression safe for %s and intentionally applies no escaping. Confirm that this legacy safety declaration is valid in the inferred context.', implode(', ', $plan['current_safe']));
         } elseif ('none' === $plan['current'] && !($plan['plain_variable'] ?? false)) {
             $status = 'review';
             $label = 'Expression safety to review';
-            $title = 'Confirm why Twig applies no escaping';
-            $guidance = 'This expression may be intrinsically safe, statically constrained, or missing safe-content metadata. Confirm its value contract before changing the template.';
+            $title = 'Review the expression value contract';
+            $guidance = 'No escaping strategy or current safe-content declaration was found. Confirm that the expression can only produce context-safe values before changing the template.';
         } else {
             $status = 'unsafe';
             $label = 'Unsafe today';
@@ -425,7 +430,7 @@ HTML;
     }
 
     /**
-     * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}} $plan
+     * @param array{template: string, path: string|null, line: int, operations: list<string>, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, type: string, assessment: array{status: 'correct'|'partial'|'review'|'unsafe', label: string, assessments: list<string>, unavailable: bool, title: string, guidance: string}} $plan
      */
     private function renderPlan(array $plan): string
     {
@@ -442,11 +447,12 @@ HTML;
             $capabilities .= '<span class="badge capability">Pipeline unavailable in current Twig</span>';
         }
         $source = $this->renderSourceExcerpt($plan['path'], $plan['line'], $plan['expression']);
+        $current = 'none' === $plan['current'] && $plan['current_safe'] ? 'safe for '.implode(', ', $plan['current_safe']) : $plan['current'];
         $search = strtolower(implode(' ', [
             $plan['template'],
             $plan['line'],
             implode(' ', $plan['operations']),
-            $plan['current'],
+            $current,
             $assessment['label'],
             $assessment['title'],
             $assessment['guidance'],
@@ -462,7 +468,7 @@ HTML;
             $this->escape($assessment['label']),
             $capabilities,
             $operations,
-            $this->escape($plan['current']),
+            $this->escape($current),
             $plan['line'],
             $this->escape($assessment['title']),
             $this->escape($assessment['guidance']),

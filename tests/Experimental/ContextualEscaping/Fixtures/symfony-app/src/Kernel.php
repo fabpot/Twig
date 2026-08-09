@@ -165,6 +165,7 @@ class Kernel
         ]);
         $twig->setLexer(new TransformingLexer($twig));
         $twig->addFunction(new TwigFunction('application_value', static fn (): string => 'value'));
+        $twig->addFunction(new TwigFunction('legacy_safe', static fn (): string => '<b>safe</b>', ['is_safe' => ['all']]));
         $twig->addTokenParser(new UnsupportedTokenParser());
         $container = new ContainerBuilder(
             ['twig' => $twig],

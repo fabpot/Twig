@@ -27,8 +27,10 @@ final class ContextualEscapingLinter
     ) {
     }
 
-    public static function create(Environment $environment): self
+    public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null): self
     {
+        $currentSafetyAnalyzer ??= new CurrentEscapingSafetyAnalyzer($environment);
+
         return new self(
             $environment,
             new ContextualEscapingAnalyzer(
@@ -39,6 +41,7 @@ final class ContextualEscapingLinter
                     new SrcsetContextParser(),
                 ),
                 new EnvironmentTemplateResolver($environment),
+                $currentSafetyAnalyzer,
             ),
         );
     }

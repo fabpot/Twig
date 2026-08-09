@@ -103,6 +103,7 @@ final class ContextualEscapingAnalyzer
     public function __construct(
         private HtmlContextParser $contextParser,
         private ?TemplateResolverInterface $templateResolver = null,
+        private ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null,
     ) {
     }
 
@@ -645,6 +646,12 @@ final class ContextualEscapingAnalyzer
             return $context->toDead();
         }
 
+        if ($this->currentSafetyAnalyzer?->analyze($expression)['constant_output']) {
+            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([])));
+
+            return $this->analyzeConstantOutput($expression, $context, $node);
+        }
+
         if ($expression instanceof ConstantExpression && !$expression->isDefinedTestEnabled() && \is_string($expression->getAttribute('value'))) {
             $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([])));
 
@@ -686,6 +693,39 @@ final class ContextualEscapingAnalyzer
             );
 
         return $context->afterJavaScriptInterpolation(\in_array(EscapeOperation::JavaScriptValue, $operations, true));
+    }
+
+    private function analyzeConstantOutput(AbstractExpression $expression, HtmlContext $context, PrintNode $origin): HtmlContext
+    {
+        if ($expression instanceof ConstantExpression) {
+            $value = $expression->getAttribute('value');
+            if (null === $value || false === $value) {
+                return $context;
+            }
+            if (true === $value) {
+                return $this->contextParser->consume($context, '1');
+            }
+            if (\is_string($value) || \is_int($value) || \is_float($value)) {
+                return $this->contextParser->consume($context, (string) $value);
+            }
+
+            throw new \LogicException(\sprintf('Unsupported constant output of type "%s".', get_debug_type($value)));
+        }
+
+        if (!$expression instanceof OperatorEscapeInterface) {
+            throw new \LogicException(\sprintf('The "%s" expression was incorrectly classified as constant output.', $expression::class));
+        }
+
+        $contexts = [];
+        foreach ($expression->getOperandNamesToEscape() as $name) {
+            $operand = $expression->getNode($name);
+            if (!$operand instanceof AbstractExpression) {
+                throw new \LogicException(\sprintf('The "%s" output operand is not an expression.', $expression::class));
+            }
+            $contexts[] = $this->analyzeConstantOutput($operand, $context, $origin);
+        }
+
+        return $this->joinContexts($contexts, $origin, 'The constant output branches end in incompatible contexts');
     }
 
     private function isDirectCompositionExpression(AbstractExpression $expression): bool

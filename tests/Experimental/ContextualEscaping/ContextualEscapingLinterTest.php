@@ -171,6 +171,7 @@ class ContextualEscapingLinterTest extends TestCase
         $this->assertSame([
             'Since twig/twig 3.29: The custom extension is deprecated.',
             'Since twig/twig 3.29: The custom extension is deprecated.',
+            'Since twig/twig 3.29: The custom extension is deprecated.',
         ], $deprecations);
         $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
     }
@@ -1217,6 +1218,26 @@ class ContextualEscapingLinterTest extends TestCase
         $result = $this->lint('{% for item in items %}text{% else %}<script>{% endfor %}');
 
         $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+    }
+
+    public function testReusesCurrentSafetyAnalysisForConstantConditionalOutput(): void
+    {
+        $result = $this->lint('<div class="{{ enabled ? "wide" : "" }}"><a href="{{ enabled ? "/one/" : "/two/" }}{{ value }}">');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [],
+            [],
+            [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
+        ], $this->getPlans($result));
+    }
+
+    public function testRejectsConstantConditionalOutputEndingInDifferentContexts(): void
+    {
+        $result = $this->lint('<a href="{{ enabled ? "/path/" : "?query=" }}{{ value }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertSame([[]], $this->getPlans($result));
     }
 
     /**
