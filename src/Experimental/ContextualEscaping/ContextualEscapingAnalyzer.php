@@ -104,6 +104,9 @@ final class ContextualEscapingAnalyzer
     /** @var array<string, FiniteStaticValueSet> */
     private array $staticValues = [];
 
+    /** @var list<array{prior: array<string, int>, current: array<string, int>}> */
+    private array $alternativeInferenceFrames = [];
+
     public function __construct(
         private HtmlContextParser $contextParser,
         private ?TemplateResolverInterface $templateResolver = null,
@@ -127,8 +130,9 @@ final class ContextualEscapingAnalyzer
         $this->activeMacros = [];
         $this->contentTypes = [];
         $this->staticValues = [];
+        $this->alternativeInferenceFrames = [];
 
-        $context = $this->analyzeModule($module, new HtmlContext(), $module);
+        $context = $this->analyzeModule($module, new HtmlContext(), $module, str_ends_with($module->getTemplateName() ?? '', '.html.twig'));
 
         if (HtmlState::Text !== $context->getState() && HtmlState::Dead !== $context->getState()) {
             $line = $module->getSourceContext() ? 1 + substr_count($module->getSourceContext()->getCode(), "\n") : $module->getTemplateLine();
@@ -143,11 +147,14 @@ final class ContextualEscapingAnalyzer
         return $this->result;
     }
 
-    private function analyzeModule(ModuleNode $module, HtmlContext $context, Node $origin): HtmlContext
+    private function analyzeModule(ModuleNode $module, HtmlContext $context, Node $origin, bool $htmlParentAlternativesOnly = false): HtmlContext
     {
-        $scope = $this->createCompositionScope($module);
-        if (null === $scope) {
+        $scopes = $this->createCompositionScopes($module, $htmlParentAlternativesOnly);
+        if (null === $scopes) {
             return $context->toDead();
+        }
+        if ([] === $scopes) {
+            return $context;
         }
 
         $moduleId = spl_object_id($module);
@@ -158,6 +165,50 @@ final class ContextualEscapingAnalyzer
         }
 
         $this->activeModules[$moduleId] = true;
+        $initialContentTypes = $this->contentTypes;
+        $initialStaticValues = $this->staticValues;
+        $contexts = [];
+        $contentTypeMaps = [];
+        $staticValueMaps = [];
+        $deduplicateAlternatives = 1 < \count($scopes);
+        if ($deduplicateAlternatives) {
+            $this->alternativeInferenceFrames[] = ['prior' => [], 'current' => []];
+        }
+
+        foreach ($scopes as $scope) {
+            $this->contentTypes = $initialContentTypes;
+            $this->staticValues = $initialStaticValues;
+            $contexts[] = $this->analyzeCompositionScope($scope, $context);
+            $contentTypeMaps[] = $this->contentTypes;
+            $staticValueMaps[] = $this->staticValues;
+            if ($deduplicateAlternatives) {
+                $frame = \count($this->alternativeInferenceFrames) - 1;
+                foreach ($this->alternativeInferenceFrames[$frame]['current'] as $key => $count) {
+                    $this->alternativeInferenceFrames[$frame]['prior'][$key] = max($count, $this->alternativeInferenceFrames[$frame]['prior'][$key] ?? 0);
+                }
+                $this->alternativeInferenceFrames[$frame]['current'] = [];
+            }
+        }
+        if ($deduplicateAlternatives) {
+            array_pop($this->alternativeInferenceFrames);
+        }
+
+        unset($this->activeModules[$moduleId]);
+        $this->contentTypes = $this->joinContentTypeMaps($contentTypeMaps);
+        $this->staticValues = $this->joinStaticValueMaps($staticValueMaps);
+
+        return $this->joinContexts($contexts, $origin, 'The static parent template alternatives end in incompatible contexts');
+    }
+
+    /**
+     * @param array{
+     *     modules: list<ModuleNode>,
+     *     blocks: array<string, list<array{module: ModuleNode, node: BlockNode}>>,
+     *     imports: array<string, ModuleNode>
+     * } $scope
+     */
+    private function analyzeCompositionScope(array $scope, HtmlContext $context): HtmlContext
+    {
         $this->compositionScopes[] = $scope;
 
         $last = \count($scope['modules']) - 1;
@@ -174,7 +225,6 @@ final class ContextualEscapingAnalyzer
         }
 
         array_pop($this->compositionScopes);
-        unset($this->activeModules[$moduleId]);
 
         return $context;
     }
@@ -189,43 +239,83 @@ final class ContextualEscapingAnalyzer
     }
 
     /**
+     * @return list<array{
+     *     modules: list<ModuleNode>,
+     *     blocks: array<string, list<array{module: ModuleNode, node: BlockNode}>>,
+     *     imports: array<string, ModuleNode>
+     * }>|null
+     */
+    private function createCompositionScopes(ModuleNode $module, bool $htmlParentAlternativesOnly = false): ?array
+    {
+        $moduleChains = $this->collectInheritanceChains($module, [], [], $module, $htmlParentAlternativesOnly);
+        if (null === $moduleChains) {
+            return null;
+        }
+
+        $scopes = [];
+        foreach ($moduleChains as $modules) {
+            if (null === $scope = $this->createCompositionScopeFromModules($modules)) {
+                return null;
+            }
+            $scopes[] = $scope;
+        }
+
+        return $scopes;
+    }
+
+    /**
+     * @param list<ModuleNode> $modules
+     * @param array<int, true> $seen
+     *
+     * @return list<list<ModuleNode>>|null
+     */
+    private function collectInheritanceChains(ModuleNode $current, array $modules, array $seen, ModuleNode $origin, bool $htmlParentAlternativesOnly): ?array
+    {
+        $id = spl_object_id($current);
+        if (isset($seen[$id])) {
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, 'Recursive template inheritance is not supported.');
+
+            return null;
+        }
+        $seen[$id] = true;
+        $modules[] = $current;
+        $this->registerEmbeddedModules($current);
+        $this->collectIndependentDiagnostics($current->getNode('display_start'));
+        $this->collectModuleIndependentDiagnostics($current);
+        $this->collectIndependentDiagnostics($current->getNode('display_end'));
+
+        if (!$current->hasNode('parent')) {
+            return [$modules];
+        }
+
+        $parents = $this->resolveParentTemplateExpressions($current->getNode('parent'), $current, $htmlParentAlternativesOnly);
+        if (null === $parents) {
+            return null;
+        }
+
+        $chains = [];
+        foreach ($parents as $parent) {
+            $parentChains = $this->collectInheritanceChains($parent, $modules, $seen, $origin, $htmlParentAlternativesOnly);
+            if (null === $parentChains) {
+                return null;
+            }
+            array_push($chains, ...$parentChains);
+        }
+
+        return $chains;
+    }
+
+    /**
+     * @param list<ModuleNode> $modules
+     *
      * @return array{
      *     modules: list<ModuleNode>,
      *     blocks: array<string, list<array{module: ModuleNode, node: BlockNode}>>,
      *     imports: array<string, ModuleNode>
      * }|null
      */
-    private function createCompositionScope(ModuleNode $module): ?array
+    private function createCompositionScopeFromModules(array $modules): ?array
     {
-        $modules = [];
-        $seen = [];
-        $current = $module;
-
-        while (true) {
-            $id = spl_object_id($current);
-            if (isset($seen[$id])) {
-                $this->addDiagnostic($module, DiagnosticCode::UnsupportedTemplateComposition, 'Recursive template inheritance is not supported.');
-
-                return null;
-            }
-            $seen[$id] = true;
-            $modules[] = $current;
-            $this->registerEmbeddedModules($current);
-            $this->collectIndependentDiagnostics($current->getNode('display_start'));
-            $this->collectModuleIndependentDiagnostics($current);
-            $this->collectIndependentDiagnostics($current->getNode('display_end'));
-
-            if (!$current->hasNode('parent')) {
-                break;
-            }
-
-            $parent = $this->resolveTemplateExpression($current->getNode('parent'), $current);
-            if (null === $parent) {
-                return null;
-            }
-            $current = $parent;
-        }
-
         $blocks = [];
         $traitModules = [];
         foreach ($modules as $scopeModule) {
@@ -267,6 +357,50 @@ final class ContextualEscapingAnalyzer
         }
 
         return ['modules' => $modules, 'blocks' => $blocks, 'imports' => $imports];
+    }
+
+    /**
+     * @return list<ModuleNode>|null
+     */
+    private function resolveParentTemplateExpressions(Node $expression, Node $origin, bool $htmlParentAlternativesOnly): ?array
+    {
+        $names = null;
+        if ($expression instanceof ConstantExpression && \is_string($expression->getAttribute('value'))) {
+            $names = [$expression->getAttribute('value')];
+        } elseif ($expression instanceof AbstractExpression && null !== $values = $this->staticExpressionAnalyzer?->analyze($expression, [])) {
+            $names = $values->getValues();
+        }
+        if (null === $names || [] === $names) {
+            $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic template references are not supported by experimental contextual escaping analysis.');
+
+            return null;
+        }
+
+        $modules = [];
+        $seen = [];
+        foreach ($names as $name) {
+            if (!\is_string($name)) {
+                $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, 'Dynamic template references are not supported by experimental contextual escaping analysis.');
+
+                return null;
+            }
+            if ($htmlParentAlternativesOnly && preg_match('/\.[^.\/]+\.twig$/D', $name) && !str_ends_with($name, '.html.twig')) {
+                continue;
+            }
+            if (isset($seen[$name])) {
+                continue;
+            }
+            $seen[$name] = true;
+            $module = $this->templateResolver?->resolve($name, $origin->getTemplateName());
+            if (null === $module) {
+                $this->addDiagnostic($origin, DiagnosticCode::UnsupportedTemplateComposition, \sprintf('The statically referenced "%s" template cannot be resolved.', $name));
+
+                return null;
+            }
+            $modules[] = $module;
+        }
+
+        return $modules;
     }
 
     private function resolveTemplateExpression(Node $expression, Node $origin, bool $ignoreMissing = false): ?ModuleNode
@@ -476,15 +610,18 @@ final class ContextualEscapingAnalyzer
         }
 
         $module = $this->resolveTemplateExpression($node->getNode('template'), $node);
-        if (null === $module || null === $scope = $this->createCompositionScope($module)) {
+        if (null === $module || null === $scopes = $this->createCompositionScopes($module)) {
             return $context->toDead();
         }
 
-        $this->compositionScopes[] = $scope;
-        $context = $this->analyzeBlock($nameNode->getAttribute('value'), $context, $node);
-        array_pop($this->compositionScopes);
+        $contexts = [];
+        foreach ($scopes as $scope) {
+            $this->compositionScopes[] = $scope;
+            $contexts[] = $this->analyzeBlock($nameNode->getAttribute('value'), $context, $node);
+            array_pop($this->compositionScopes);
+        }
 
-        return $context;
+        return $this->joinContexts($contexts, $node, 'The static parent template alternatives render the block in incompatible contexts');
     }
 
     private function analyzeParentBlock(ParentExpression $node, HtmlContext $context): HtmlContext
@@ -590,26 +727,31 @@ final class ContextualEscapingAnalyzer
             return $context->toDead();
         }
 
-        $macroScope = $this->createCompositionScope($module);
-        if (null === $macroScope) {
+        $scopes = \in_array($module, $scope['modules'], true) ? [$scope] : $this->createCompositionScopes($module);
+        if (null === $scopes) {
             return $context->toDead();
         }
 
         $this->activeMacros[$key] = $context;
-        $this->compositionScopes[] = $macroScope;
-        $this->moduleStack[] = $module;
         $contentTypes = $this->contentTypes;
         $staticValues = $this->staticValues;
-        $this->contentTypes = $this->getMacroArgumentContentTypes($node, $macro);
-        $this->staticValues = $this->getMacroArgumentStaticValues($node, $macro);
-        $context = $this->analyzeNode($macro->getNode('body'), $context);
+        $argumentContentTypes = $this->getMacroArgumentContentTypes($node, $macro);
+        $argumentStaticValues = $this->getMacroArgumentStaticValues($node, $macro);
+        $contexts = [];
+        foreach ($scopes as $scope) {
+            $this->compositionScopes[] = $scope;
+            $this->moduleStack[] = $module;
+            $this->contentTypes = $argumentContentTypes;
+            $this->staticValues = $argumentStaticValues;
+            $contexts[] = $this->analyzeNode($macro->getNode('body'), $context);
+            array_pop($this->moduleStack);
+            array_pop($this->compositionScopes);
+        }
         $this->contentTypes = $contentTypes;
         $this->staticValues = $staticValues;
-        array_pop($this->moduleStack);
-        array_pop($this->compositionScopes);
         unset($this->activeMacros[$key]);
 
-        return $context;
+        return $this->joinContexts($contexts, $node, 'The static parent template alternatives render the macro in incompatible contexts');
     }
 
     /**
@@ -710,13 +852,13 @@ final class ContextualEscapingAnalyzer
         }
 
         if ($this->currentSafetyAnalyzer?->analyze($expression)['constant_output']) {
-            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
+            $this->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
 
             return $this->analyzeConstantOutput($expression, $context, $node);
         }
 
         if ($expression instanceof ConstantExpression && !$expression->isDefinedTestEnabled() && \is_string($expression->getAttribute('value'))) {
-            $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
+            $this->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe()));
 
             return $this->contextParser->consume($context, $expression->getAttribute('value'));
         }
@@ -726,7 +868,7 @@ final class ContextualEscapingAnalyzer
             if (null !== $outputs) {
                 $outputContext = $this->analyzeStaticOutputs($outputs, $context, $node);
                 if (HtmlState::Dead !== $outputContext->getState()) {
-                    $this->result->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe(), $staticValues->getProvenance(), $outputs));
+                    $this->addInferredEscape(new InferredEscape($node, new EscapePlan([]), $context->describe(), $staticValues->getProvenance(), $outputs));
                 }
 
                 return $outputContext;
@@ -749,7 +891,7 @@ final class ContextualEscapingAnalyzer
             return $this->contextAfterUnsupportedPrint($context);
         }
 
-        $this->result->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContract: $this->collectValueContracts($expression)));
+        $this->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContract: $this->collectValueContracts($expression)));
         $operations = $plan->getOperations();
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
@@ -1961,6 +2103,29 @@ final class ContextualEscapingAnalyzer
                 if (null === $this->nodeAnalyzerRegistry?->classify($node)) {
                     $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
                 }
+        }
+    }
+
+    private function addInferredEscape(InferredEscape $inferredEscape): void
+    {
+        $key = serialize([
+            spl_object_id($inferredEscape->getNode()),
+            array_map(static fn (EscapeOperation $operation): string => $operation->name, $inferredEscape->getPlan()->getOperations()),
+            $inferredEscape->getContext(),
+            $inferredEscape->getProvenance(),
+            $inferredEscape->getStaticOutputs(),
+            $inferredEscape->getValueContract(),
+        ]);
+        $duplicate = false;
+        foreach (array_keys($this->alternativeInferenceFrames) as $index) {
+            $count = 1 + ($this->alternativeInferenceFrames[$index]['current'][$key] ?? 0);
+            $this->alternativeInferenceFrames[$index]['current'][$key] = $count;
+            if ($count <= ($this->alternativeInferenceFrames[$index]['prior'][$key] ?? 0)) {
+                $duplicate = true;
+            }
+        }
+        if (!$duplicate) {
+            $this->result->addInferredEscape($inferredEscape);
         }
     }
 

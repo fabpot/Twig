@@ -1630,6 +1630,84 @@ class ContextualEscapingLinterTest extends TestCase
             'index.html.twig',
             [[EscapeOperation::HtmlAttribute]],
         ];
+        yield 'conditional inheritance' => [
+            [
+                'attribute.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'javascript.html.twig' => '<script>const value = "{% block content %}{% endblock %}";</script>',
+                'index.html.twig' => '{% extends use_javascript ? "javascript.html.twig" : "attribute.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::JavaScriptString], [EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'conditional inheritance ignores non-HTML output alternatives' => [
+            [
+                'attribute.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'message.txt.twig' => '{% block content %}{% endblock %}',
+                'index.html.twig' => '{% extends html ? "attribute.html.twig" : "message.txt.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'conditional inheritance with only non-HTML output alternatives' => [
+            [
+                'plain.txt.twig' => '{% block content %}{% endblock %}',
+                'data.json.twig' => '{% block content %}{% endblock %}',
+                'index.html.twig' => '{% extends plain ? "plain.txt.twig" : "data.json.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [],
+        ];
+        yield 'conditional inheritance deduplicates equivalent analysis paths' => [
+            [
+                'paragraph.html.twig' => '<p>{% block content %}{% endblock %}</p>',
+                'division.html.twig' => '<div>{% block content %}{% endblock %}</div>',
+                'index.html.twig' => '{% extends use_paragraph ? "paragraph.html.twig" : "division.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText]],
+        ];
+        yield 'conditional inheritance preserves maximum output multiplicity' => [
+            [
+                'once.html.twig' => '{% block content %}{% endblock %}',
+                'twice.html.twig' => '{% block content %}{% endblock %}{{ block("content") }}',
+                'index.html.twig' => '{% extends repeat ? "twice.html.twig" : "once.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'conditional parent blocks' => [
+            [
+                'attribute.html.twig' => '<div title="{% block content %}{{ attribute_value }}{% endblock %}">',
+                'javascript.html.twig' => '<script>const value = "{% block content %}{{ javascript_value }}{% endblock %}";</script>',
+                'index.html.twig' => '{% extends use_javascript ? "javascript.html.twig" : "attribute.html.twig" %}{% block content %}{{ child_value }}{{ parent() }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [
+                [EscapeOperation::JavaScriptString],
+                [EscapeOperation::JavaScriptString],
+                [EscapeOperation::HtmlAttribute],
+                [EscapeOperation::HtmlAttribute],
+            ],
+        ];
+        yield 'conditional inheritance with a self macro' => [
+            [
+                'attribute.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'javascript.html.twig' => '<script>const value = "{% block content %}{% endblock %}";</script>',
+                'index.html.twig' => '{% extends use_javascript ? "javascript.html.twig" : "attribute.html.twig" %}{% macro value() %}{{ value }}{% endmacro %}{% block content %}{{ _self.value() }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::JavaScriptString], [EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'nested conditional inheritance' => [
+            [
+                'attribute.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'javascript.html.twig' => '<script>const value = "{% block content %}{% endblock %}";</script>',
+                'middle.html.twig' => '{% extends use_javascript ? "javascript.html.twig" : "attribute.html.twig" %}',
+                'index.html.twig' => '{% extends "middle.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::JavaScriptString], [EscapeOperation::HtmlAttribute]],
+        ];
         yield 'parent block' => [
             [
                 'base.html.twig' => '{% block content %}{{ parent_value }}{% endblock %}',
@@ -1834,6 +1912,17 @@ class ContextualEscapingLinterTest extends TestCase
 
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($result));
+    }
+
+    public function testRejectsPartiallyDynamicConditionalInheritance(): void
+    {
+        $result = $this->lintTemplates([
+            'base.html.twig' => '{% block content %}{% endblock %}',
+            'index.html.twig' => '{% extends condition ? "base.html.twig" : parent_template %}{% block content %}{{ value }}{% endblock %}',
+        ], 'index.html.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedTemplateComposition], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('Dynamic template references', $result->getDiagnostics()[0]->getMessage());
     }
 
     public function testRejectsRecursiveComposition(): void
