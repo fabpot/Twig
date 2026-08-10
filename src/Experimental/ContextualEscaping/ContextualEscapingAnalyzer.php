@@ -114,6 +114,7 @@ final class ContextualEscapingAnalyzer
         private ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null,
         private ?StaticExpressionAnalyzer $staticExpressionAnalyzer = null,
         private ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null,
+        private ?ContextualEscapingAttributeMapAnalyzerRegistry $attributeMapAnalyzerRegistry = null,
     ) {
     }
 
@@ -1605,6 +1606,10 @@ final class ContextualEscapingAnalyzer
 
     private function analyzeFor(ForNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
+        if (HtmlState::BeforeAttributeName === $context->getState() && null !== $this->attributeMapAnalyzerRegistry?->analyze($node, $this->getCurrentBlockName())) {
+            return $context;
+        }
+
         $inputContentTypes = $this->contentTypes;
         $inputStaticValues = $this->staticValues;
         $this->removeAssignedStaticValues($node->getNode('key_target'));
@@ -1814,6 +1819,11 @@ final class ContextualEscapingAnalyzer
                 $this->staticValues[$key] = $value->withProvenance($name instanceof ContextVariable ? $name->getAttribute('name') : 'local value');
             }
         }
+    }
+
+    private function getCurrentBlockName(): ?string
+    {
+        return $this->blockStack ? $this->blockStack[\count($this->blockStack) - 1]['name'] : null;
     }
 
     private function getVariableKey(ContextVariable|LocalVariable $variable): string

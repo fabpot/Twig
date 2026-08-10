@@ -27,11 +27,15 @@ final class ContextualEscapingLinter
     ) {
     }
 
-    public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null, ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null, ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null): self
+    public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null, ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null, ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null, ?ContextualEscapingAttributeMapAnalyzerRegistry $attributeMapAnalyzerRegistry = null): self
     {
         $currentSafetyAnalyzer ??= new CurrentEscapingSafetyAnalyzer($environment);
         $nodeAnalyzerRegistry ??= new ContextualEscapingNodeAnalyzerRegistry([new SymfonyUxNodeAnalyzer(), new SymfonyBridgeNodeAnalyzer()]);
         $callableAnalyzerRegistry ??= new ContextualEscapingCallableAnalyzerRegistry([new SymfonyCallableAnalyzer()]);
+        if (null === $attributeMapAnalyzerRegistry) {
+            $shapeAnalyzer = new HtmlAttributeMapLoopShapeAnalyzer();
+            $attributeMapAnalyzerRegistry = new ContextualEscapingAttributeMapAnalyzerRegistry([new SymfonyFormAttributeMapAnalyzer($shapeAnalyzer), new EasyAdminAttributeMapAnalyzer($shapeAnalyzer)]);
+        }
 
         return new self(
             $environment,
@@ -47,6 +51,7 @@ final class ContextualEscapingLinter
                 $nodeAnalyzerRegistry,
                 new StaticExpressionAnalyzer($environment),
                 $callableAnalyzerRegistry,
+                $attributeMapAnalyzerRegistry,
             ),
         );
     }

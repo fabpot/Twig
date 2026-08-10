@@ -1997,6 +1997,48 @@ class ContextualEscapingLinterTest extends TestCase
         ], $this->getPlans($result));
     }
 
+    public function testAnalyzesSymfonyFormAttributeMaps(): void
+    {
+        $template = <<<'TWIG'
+<div {{ block('widget_attributes') }}>
+{% block widget_attributes %}
+    {% for attrname, attrvalue in attr %}
+        {% if attrvalue is same as(true) %}
+            {{ attrname }}="{{ attrname }}"
+        {% elseif attrvalue is not same as(false) %}
+            {{ attrname }}="{{ attrvalue }}"
+        {% endif %}
+    {% endfor %}
+{% endblock %}
+TWIG;
+
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+    }
+
+    public function testAnalyzesEasyAdminAttributeMaps(): void
+    {
+        $result = $this->lint('<link {% for attr, value in css_asset.htmlAttributes %} {{ attr }}="{{ value|e("html") }}"{% endfor %}>', '@EasyAdmin/includes/_css_assets.html.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([], $this->getPlans($result));
+    }
+
+    public function testDoesNotTrustConventionalAttributeMapVariablesWithoutAProviderContract(): void
+    {
+        $result = $this->lint('<div {% for attrname, attrvalue in attr %} {{ attrname }}="{{ attrvalue }}"{% endfor %}>');
+
+        $this->assertSame([DiagnosticCode::UnsupportedStructuralInterpolation], $this->getDiagnosticCodes($result));
+    }
+
+    public function testRejectsMalformedTrustedAttributeMapRenderers(): void
+    {
+        $result = $this->lint('<link {% for attr, value in css_asset.htmlAttributes %} {{ attr }}={{ value|e("html") }}{% endfor %}>', '@EasyAdmin/includes/_css_assets.html.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedStructuralInterpolation], $this->getDiagnosticCodes($result));
+    }
+
     public function testAnalyzesSupportedSymfonyBridgeNodes(): void
     {
         require_once __DIR__.'/Fixtures/SymfonyBridgeNodes.php';
