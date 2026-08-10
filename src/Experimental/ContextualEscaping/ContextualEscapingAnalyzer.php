@@ -29,6 +29,7 @@ use Twig\Node\Expression\BlockReferenceExpression;
 use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\FunctionExpression;
+use Twig\Node\Expression\GetAttrExpression;
 use Twig\Node\Expression\MacroReferenceExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
 use Twig\Node\Expression\ParentExpression;
@@ -925,6 +926,23 @@ final class ContextualEscapingAnalyzer
             return $this->contentTypes[$this->getVariableKey($expression)] ?? new ContentTypeSet([ContentType::PlainText]);
         }
 
+        if ($expression instanceof GetAttrExpression) {
+            $input = $expression->getNode('node');
+            $attribute = $expression->getNode('attribute');
+            if ($input instanceof AbstractExpression && $attribute instanceof ConstantExpression && \is_string($name = $attribute->getAttribute('value'))) {
+                $inputTypes = $this->inferContentTypes($input, $context);
+                if ($inputTypes->contains(ContentType::HtmlAttributeList)) {
+                    return match ($name) {
+                        'defaults', 'only', 'without', 'add', 'remove', 'nested' => $inputTypes,
+                        'render' => new ContentTypeSet([ContentType::HtmlAttribute]),
+                        default => new ContentTypeSet([ContentType::PlainText]),
+                    };
+                }
+            }
+
+            return new ContentTypeSet([ContentType::PlainText]);
+        }
+
         if ($this->isDirectCompositionExpression($expression)) {
             $output = $this->analyzeCompositionExpression($expression, new HtmlContext(), $expression);
             if (HtmlState::Dead === $output->getState()) {
@@ -1059,6 +1077,15 @@ final class ContextualEscapingAnalyzer
 
     private function inferPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes): ?EscapePlan
     {
+        if ($contentTypes->contains(ContentType::HtmlAttributeList)) {
+            if (HtmlState::BeforeAttributeName === $context->getState()) {
+                return new EscapePlan([]);
+            }
+
+            $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('An HTML attribute list cannot be rendered in %s.', $context->describe()));
+
+            return null;
+        }
         if ($context->getState()->isScriptData()) {
             return $this->inferJavaScriptPlan($node, $context, $contentTypes, false);
         }
@@ -1734,7 +1761,19 @@ final class ContextualEscapingAnalyzer
             return $this->rejectUnknownNode($node, $context);
         }
         if (ContextualEscapingNodeType::ContextPreserving === $type) {
+            foreach ($this->nodeAnalyzerRegistry?->getVariableContentTypes($node) ?? [] as $name => $contentTypes) {
+                $this->contentTypes['context:'.$name] = $contentTypes;
+            }
+
             return $context;
+        }
+        if (ContextualEscapingNodeType::PlainTextOutput === $type) {
+            $print = new PrintNode(new RuntimeOutputExpression([], [], $node->getTemplateLine()), $node->getTemplateLine());
+            if (null !== $source = $node->getSourceContext()) {
+                $print->setSourceContext($source);
+            }
+
+            return $this->analyzePrint($print, $context, false);
         }
         if (HtmlState::Text === $context->getState()) {
             return $context;

@@ -26,6 +26,7 @@ use Twig\Experimental\ContextualEscaping\FiniteStaticValueSet;
 use Twig\Experimental\ContextualEscaping\HtmlContextParser;
 use Twig\Experimental\ContextualEscaping\JavaScriptContextParser;
 use Twig\Experimental\ContextualEscaping\MetaRefreshContextParser;
+use Twig\Experimental\ContextualEscaping\RuntimeOutputExpression;
 use Twig\Experimental\ContextualEscaping\SrcsetContextParser;
 use Twig\Extension\ProfilerExtension;
 use Twig\Loader\ArrayLoader;
@@ -1907,6 +1908,39 @@ class ContextualEscapingLinterTest extends TestCase
         ], $this->getPlans($result));
     }
 
+    public function testAnalyzesSupportedSymfonyBridgeNodes(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyBridgeNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyBridgeNodeTokenParser('bridge_form_theme'));
+        $environment->addTokenParser(new SymfonyBridgeNodeTokenParser('bridge_trans'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% bridge_form_theme %}<p>{% bridge_trans %}</p><script>const value = "{% bridge_trans %}";</script>', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([
+            [EscapeOperation::HtmlText],
+            [EscapeOperation::JavaScriptString],
+        ], $this->getPlans($result));
+        foreach ($result->getInferredEscapes() as $inferredEscape) {
+            $this->assertInstanceOf(RuntimeOutputExpression::class, $inferredEscape->getNode()->getNode('expr'));
+        }
+    }
+
+    public function testRejectsUnsupportedSymfonyBridgeNodeShapes(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyBridgeNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyBridgeNodeTokenParser('bridge_invalid_form_theme'));
+        $environment->addTokenParser(new SymfonyBridgeNodeTokenParser('bridge_invalid_trans'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% bridge_invalid_form_theme %}{% bridge_invalid_trans %}', 'index.html.twig'));
+
+        $this->assertSame([DiagnosticCode::UnsupportedNode, DiagnosticCode::UnsupportedNode], $this->getDiagnosticCodes($result));
+    }
+
     public function testAnalyzesSupportedSymfonyUxNodes(): void
     {
         require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
@@ -1932,6 +1966,31 @@ class ContextualEscapingLinterTest extends TestCase
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
         $this->assertStringContainsString('produces a complete HTML fragment', $result->getDiagnostics()[0]->getMessage());
+    }
+
+    public function testAnalyzesSymfonyUxComponentAttributes(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_props'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% ux_props %}<div {{ attributes.defaults({class: "button"}).without("id") }} title="{{ attributes.render("title") }}">', 'index.html.twig'));
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[], []], $this->getPlans($result));
+    }
+
+    public function testRejectsSymfonyUxComponentAttributesOutsideAttributeListContext(): void
+    {
+        require_once __DIR__.'/Fixtures/SymfonyUxNodes.php';
+
+        $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);
+        $environment->addTokenParser(new SymfonyUxNodeTokenParser('ux_props'));
+
+        $result = $this->createLinter($environment)->lint(new Source('{% ux_props %}<p>{{ attributes }}</p>', 'index.html.twig'));
+
+        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
 
     public function testRejectsUnsupportedSymfonyUxNodeShapes(): void
@@ -2012,6 +2071,30 @@ class ContextualEscapingLinterTest extends TestCase
     private function getPlans(AnalysisResult $result): array
     {
         return array_map(static fn ($inferredEscape) => $inferredEscape->getPlan()->getOperations(), $result->getInferredEscapes());
+    }
+}
+
+final class SymfonyBridgeNodeTokenParser extends AbstractTokenParser
+{
+    public function __construct(private string $tag)
+    {
+    }
+
+    public function parse(Token $token): Node
+    {
+        $this->parser->getStream()->expect(Token::BLOCK_END_TYPE);
+
+        return match ($this->tag) {
+            'bridge_form_theme' => new \Symfony\Bridge\Twig\Node\FormThemeNode($token->getLine()),
+            'bridge_trans' => new \Symfony\Bridge\Twig\Node\TransNode($token->getLine()),
+            'bridge_invalid_form_theme' => new \Symfony\Bridge\Twig\Node\FormThemeNode($token->getLine(), false),
+            'bridge_invalid_trans' => new \Symfony\Bridge\Twig\Node\TransNode($token->getLine(), false),
+        };
+    }
+
+    public function getTag(): string
+    {
+        return $this->tag;
     }
 }
 

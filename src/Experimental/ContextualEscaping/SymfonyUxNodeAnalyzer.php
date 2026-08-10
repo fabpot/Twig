@@ -19,7 +19,7 @@ use Twig\Node\Node;
  *
  * @experimental
  */
-final class SymfonyUxNodeAnalyzer implements ContextualEscapingNodeAnalyzerInterface
+final class SymfonyUxNodeAnalyzer implements ContextualEscapingVariableNodeAnalyzerInterface
 {
     private const COMPONENT_NODE = 'Symfony\\UX\\TwigComponent\\Twig\\ComponentNode';
     private const PROPS_NODE = 'Symfony\\UX\\TwigComponent\\Twig\\PropsNode';
@@ -31,6 +31,15 @@ final class SymfonyUxNodeAnalyzer implements ContextualEscapingNodeAnalyzerInter
             self::PROPS_NODE => $this->isSupportedPropsNode($node) ? ContextualEscapingNodeType::ContextPreserving : null,
             default => null,
         };
+    }
+
+    public function getVariableContentTypes(Node $node): array
+    {
+        if (self::PROPS_NODE !== $node::class || !$this->isSupportedPropsNode($node)) {
+            return [];
+        }
+
+        return ['attributes' => new ContentTypeSet([ContentType::HtmlAttributeList])];
     }
 
     private function isSupportedComponentNode(Node $node): bool

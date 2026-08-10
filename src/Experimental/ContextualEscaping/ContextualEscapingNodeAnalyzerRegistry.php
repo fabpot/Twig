@@ -41,4 +41,21 @@ final class ContextualEscapingNodeAnalyzerRegistry
 
         return null;
     }
+
+    /**
+     * @return array<string, ContentTypeSet>
+     */
+    public function getVariableContentTypes(Node $node): array
+    {
+        foreach ($this->analyzers as $analyzer) {
+            if (!$analyzer instanceof ContextualEscapingVariableNodeAnalyzerInterface) {
+                continue;
+            }
+            if ([] !== $contentTypes = $analyzer->getVariableContentTypes($node)) {
+                return $contentTypes;
+            }
+        }
+
+        return [];
+    }
 }

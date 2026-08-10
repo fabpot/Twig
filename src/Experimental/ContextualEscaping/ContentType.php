@@ -21,6 +21,7 @@ enum ContentType
     case PlainText;
     case TrustedInnermost;
     case Html;
+    case HtmlAttributeList;
     case HtmlAttribute;
     case HtmlAttributeUnquoted;
     case HtmlRcdata;

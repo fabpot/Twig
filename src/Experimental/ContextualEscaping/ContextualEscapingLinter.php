@@ -30,7 +30,7 @@ final class ContextualEscapingLinter
     public static function create(Environment $environment, ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null, ?ContextualEscapingNodeAnalyzerRegistry $nodeAnalyzerRegistry = null, ?ContextualEscapingCallableAnalyzerRegistry $callableAnalyzerRegistry = null): self
     {
         $currentSafetyAnalyzer ??= new CurrentEscapingSafetyAnalyzer($environment);
-        $nodeAnalyzerRegistry ??= new ContextualEscapingNodeAnalyzerRegistry([new SymfonyUxNodeAnalyzer()]);
+        $nodeAnalyzerRegistry ??= new ContextualEscapingNodeAnalyzerRegistry([new SymfonyUxNodeAnalyzer(), new SymfonyBridgeNodeAnalyzer()]);
         $callableAnalyzerRegistry ??= new ContextualEscapingCallableAnalyzerRegistry([new SymfonyCallableAnalyzer()]);
 
         return new self(

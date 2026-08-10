@@ -11,14 +11,13 @@
 
 namespace Twig\Experimental\ContextualEscaping;
 
+use Twig\Node\Expression\AbstractExpression;
+
 /**
  * @internal
  *
  * @experimental
  */
-enum ContextualEscapingNodeType
+final class RuntimeOutputExpression extends AbstractExpression
 {
-    case ContextPreserving;
-    case HtmlFragment;
-    case PlainTextOutput;
 }

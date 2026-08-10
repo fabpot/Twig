@@ -11,14 +11,17 @@
 
 namespace Twig\Experimental\ContextualEscaping;
 
+use Twig\Node\Node;
+
 /**
  * @internal
  *
  * @experimental
  */
-enum ContextualEscapingNodeType
+interface ContextualEscapingVariableNodeAnalyzerInterface extends ContextualEscapingNodeAnalyzerInterface
 {
-    case ContextPreserving;
-    case HtmlFragment;
-    case PlainTextOutput;
+    /**
+     * @return array<string, ContentTypeSet>
+     */
+    public function getVariableContentTypes(Node $node): array;
 }
