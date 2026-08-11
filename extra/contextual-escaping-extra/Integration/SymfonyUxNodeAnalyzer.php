@@ -48,17 +48,23 @@ final class SymfonyUxNodeAnalyzer implements VariableNodeAnalyzerInterface
 
     private function isSupportedComponentNode(Node $node): bool
     {
-        foreach (['only', 'embedded_template', 'embedded_index', 'component'] as $name) {
+        foreach (['only', 'embedded_template', 'embedded_index'] as $name) {
             if (!$node->hasAttribute($name)) {
                 return false;
             }
         }
-        if (!\is_bool($node->getAttribute('only')) || !\is_string($node->getAttribute('embedded_template')) || !\is_int($node->getAttribute('embedded_index')) || !\is_string($node->getAttribute('component'))) {
+        if (!\is_bool($node->getAttribute('only')) || !\is_string($node->getAttribute('embedded_template')) || !\is_int($node->getAttribute('embedded_index'))) {
+            return false;
+        }
+
+        $componentNode = $node->hasNode('component');
+        $componentAttribute = $node->hasAttribute('component');
+        if ($componentNode === $componentAttribute || ($componentNode && !$node->getNode('component') instanceof AbstractExpression) || ($componentAttribute && !\is_string($node->getAttribute('component')))) {
             return false;
         }
 
         foreach ($node as $name => $child) {
-            if ('props' !== $name || !$child instanceof AbstractExpression) {
+            if (!\in_array($name, ['component', 'props'], true) || !$child instanceof AbstractExpression) {
                 return false;
             }
         }

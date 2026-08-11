@@ -4,6 +4,7 @@ namespace Symfony\UX\TwigComponent\Twig;
 
 use Twig\Attribute\YieldReady;
 use Twig\Node\Expression\AbstractExpression;
+use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Node;
 use Twig\Node\NodeOutputInterface;
 
@@ -12,11 +13,10 @@ final class ComponentNode extends Node implements NodeOutputInterface
 {
     public function __construct(int $line, bool $valid = true)
     {
-        parent::__construct([], $valid ? [
+        parent::__construct($valid ? ['component' => new ConstantExpression('Test', $line)] : [], $valid ? [
             'only' => false,
             'embedded_template' => '__embedded__',
             'embedded_index' => 0,
-            'component' => 'Test',
         ] : [], $line);
     }
 }
