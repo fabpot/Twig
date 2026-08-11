@@ -45,8 +45,13 @@ final class ApplicationKernel extends Kernel
         $container->register('twig.contextual_escaping.audit_environment', Environment::class)
             ->setArguments([new Reference('twig.contextual_escaping.audit_loader'), ['autoescape' => 'html', 'strict_variables' => true]])
         ;
+        $container->register(FindingAssessor::class);
+        $container->register(SourceExcerptBuilder::class);
+        $container->register(ReportDataBuilder::class)
+            ->setArguments([new Reference(FindingAssessor::class), new Reference(SourceExcerptBuilder::class), '%kernel.project_dir%'])
+        ;
         $container->register(HtmlReport::class)
-            ->setArguments([new Reference('twig.contextual_escaping.audit_environment'), '%kernel.project_dir%/var/contextual-escaping.html', '%kernel.project_dir%'])
+            ->setArguments([new Reference('twig.contextual_escaping.audit_environment'), new Reference(ReportDataBuilder::class), '%kernel.project_dir%/var/contextual-escaping.html'])
         ;
         $container->register(Baseline::class)
             ->setArguments(['%kernel.project_dir%/var/contextual-escaping.json'])
