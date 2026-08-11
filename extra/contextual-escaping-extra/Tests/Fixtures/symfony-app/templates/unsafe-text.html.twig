@@ -1,1 +1,1 @@
-<p>{{ value }}</p>
+{{ condition ? value|e('html')|replace({'&lt;': '<'}) : other|e('html') }}

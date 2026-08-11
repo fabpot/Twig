@@ -240,20 +240,29 @@ final class Application
             }
 
             $input = $expression->getNode('node');
+            if (!$filter instanceof TwigFilter || !$input instanceof AbstractExpression) {
+                return [];
+            }
+            $strategies = $this->getCurrentEscapingStrategies($input);
+            if ('raw' === $filter->getName() || \in_array('all', $filter->getPreservesSafety(), true)) {
+                return $strategies;
+            }
 
-            return $input instanceof AbstractExpression ? $this->getCurrentEscapingStrategies($input) : [];
+            return array_values(array_intersect($strategies, $filter->getPreservesSafety()));
         }
 
         if ($expression instanceof OperatorEscapeInterface) {
-            $strategies = [];
+            $strategies = null;
             foreach ($expression->getOperandNamesToEscape() as $name) {
                 $operand = $expression->getNode($name);
-                if ($operand instanceof AbstractExpression) {
-                    $strategies = [...$strategies, ...$this->getCurrentEscapingStrategies($operand)];
+                if (!$operand instanceof AbstractExpression || $this->currentSafetyAnalyzer->analyze($operand)['constant_output']) {
+                    continue;
                 }
+                $operandStrategies = $this->getCurrentEscapingStrategies($operand);
+                $strategies = null === $strategies ? $operandStrategies : array_intersect($strategies, $operandStrategies);
             }
 
-            return array_values(array_unique($strategies));
+            return array_values($strategies ?? []);
         }
 
         return [];

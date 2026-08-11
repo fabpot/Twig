@@ -40,7 +40,7 @@ final class LinterScriptTest extends TestCase
                 'transformed-component.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <twig:Link href="{{',
                 'transformed-output.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: <app:output />',
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
-                'unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ value }}',
+                "unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ condition ? value|e('html')|replace({'&lt;': '<'}) : other|e('html') }}",
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
                 'Analyzed 18 templates and 17 output sites; found 14 contextual escape plans (2 correct, 12 incorrect) and 3 diagnostics.',
                 'Proved 1 finite static output site safe.',
@@ -54,11 +54,11 @@ final class LinterScriptTest extends TestCase
             $this->assertSame(array_column($json['findings'], 'id'), array_values(array_unique(array_column($json['findings'], 'id'))));
             $this->assertStringContainsString('<input id="search"', $html);
             $this->assertStringContainsString('<strong>7</strong>outer protection present', $html);
-            $this->assertStringContainsString('<strong>2</strong>findings to review', $html);
-            $this->assertStringContainsString('<strong>3</strong>unsafe today', $html);
+            $this->assertStringContainsString('<strong>3</strong>findings to review', $html);
+            $this->assertStringContainsString('<strong>2</strong>unsafe today', $html);
             $this->assertStringContainsString('<strong>7</strong>pipelines unavailable', $html);
-            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">4</span>', $html);
-            $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">2</span>', $html);
+            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">3</span>', $html);
+            $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">3</span>', $html);
             $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">7</span>', $html);
             $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">10</span>', $html);
             $this->assertStringContainsString('data-summary-status="unsafe"', $html);
