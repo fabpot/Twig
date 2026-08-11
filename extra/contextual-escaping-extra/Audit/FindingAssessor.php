@@ -170,6 +170,15 @@ final class FindingAssessor
             ];
         }
 
+        if ('UnsafeUrlScheme' === $code) {
+            return [
+                'assessment' => 'diagnostic-error',
+                'label' => 'Executable URL scheme',
+                'title' => 'Remove the executable URL scheme',
+                'guidance' => 'Values after a static javascript: or vbscript: scheme run as code, and no URL encoding can make them safe. Restructure the template so untrusted values never follow an executable scheme.',
+            ];
+        }
+
         if (\in_array($code, ['SyntaxError', 'MismatchedExplicitEscaping'], true)) {
             return [
                 'assessment' => 'diagnostic-error',

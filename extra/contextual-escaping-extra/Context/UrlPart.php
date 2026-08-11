@@ -22,5 +22,6 @@ enum UrlPart
     case Start;
     case Path;
     case QueryOrFragment;
+    case UnsafeScheme;
     case Unknown;
 }

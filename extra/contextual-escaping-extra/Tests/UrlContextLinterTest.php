@@ -271,6 +271,65 @@ class UrlContextLinterTest extends AbstractLinterTestCase
         ], $this->getPlans($result));
     }
 
+    /**
+     * @dataProvider provideExecutableSchemeContexts
+     */
+    #[DataProvider('provideExecutableSchemeContexts')]
+    public function testRejectsOutputAfterAStaticExecutableScheme(string $template): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([DiagnosticCode::UnsafeUrlScheme], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('executable code', $result->getDiagnostics()[0]->getMessage());
+    }
+
+    public static function provideExecutableSchemeContexts(): iterable
+    {
+        yield 'javascript scheme' => ['<a href="javascript:{{ value }}">'];
+        yield 'uppercase javascript scheme' => ['<a href="JAVASCRIPT:{{ value }}">'];
+        yield 'javascript scheme with stripped tab' => ["<a href=\"java\tscript:{{ value }}\">"];
+        yield 'vbscript scheme' => ['<a href="vbscript:{{ value }}">'];
+        yield 'unquoted javascript scheme' => ['<a href=javascript:{{ value }}>'];
+        yield 'iframe javascript scheme' => ['<iframe src="javascript:{{ value }}"></iframe>'];
+        yield 'query delimiter after an executable scheme' => ['<a href="javascript:void(0)?next={{ value }}">'];
+        yield 'trusted value after an executable scheme' => ['<a href="javascript:{{ value|raw }}">'];
+        yield 'static executable scheme expression' => ['<a href="{{ "javascript:" }}{{ value }}">'];
+    }
+
+    /**
+     * @param list<list<EscapeOperation>> $expectedPlans
+     *
+     * @dataProvider provideNonExecutableSchemeContexts
+     */
+    #[DataProvider('provideNonExecutableSchemeContexts')]
+    public function testInfersPlansAfterNonExecutableSchemes(string $template, array $expectedPlans): void
+    {
+        $result = $this->lint($template);
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame($expectedPlans, $this->getPlans($result));
+    }
+
+    public static function provideNonExecutableSchemeContexts(): iterable
+    {
+        yield 'https scheme' => [
+            '<a href="https://example.com/{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'mailto scheme' => [
+            '<a href="mailto:{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'javascript path segment without a scheme delimiter' => [
+            '<a href="/javascript/{{ value }}">',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
+        yield 'javascript query value' => [
+            '<a href="/run?lang=javascript:{{ value }}">',
+            [[EscapeOperation::UrlQuery, EscapeOperation::HtmlAttribute]],
+        ];
+    }
+
     public function testRejectsAmbiguousUrlInterpolation(): void
     {
         $result = $this->lint('<a href="{{ base }}/{{ path }}">');

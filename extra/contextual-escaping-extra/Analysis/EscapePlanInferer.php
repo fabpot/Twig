@@ -124,6 +124,9 @@ final class EscapePlanInferer
 
     private function inferUrlPlan(HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): EscapePlanInference
     {
+        if (UrlPart::UnsafeScheme === $context->getUrlPart()) {
+            return new EscapePlanInference(DiagnosticCode::UnsafeUrlScheme, 'Output after a static "javascript:" or "vbscript:" scheme is executable code, which no URL escaping can make safe.');
+        }
         if (\in_array($context->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
             return new EscapePlanInference(DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic URL without a static query or fragment delimiter is ambiguous.');
         }

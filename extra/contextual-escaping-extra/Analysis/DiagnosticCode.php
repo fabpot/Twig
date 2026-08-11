@@ -29,6 +29,7 @@ enum DiagnosticCode
     case IncompleteStructuredOutput;
     case MismatchedExplicitEscaping;
     case SyntaxError;
+    case UnsafeUrlScheme;
     case UnstableLoop;
     case UnsupportedAttributeContext;
     case UnsupportedNode;
