@@ -27,7 +27,9 @@ enum JavaScriptState
     case LessThan;
     case HtmlOpenCommentBang;
     case HtmlOpenCommentDash;
+    case Plus;
     case Minus;
+    case ClosingParenthesis;
     case HtmlCloseCommentDashDash;
     case LineComment;
     case BlockComment;

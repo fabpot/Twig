@@ -1156,6 +1156,14 @@ class LinterTest extends TestCase
             '<script>const result = other-{{ value }};</script>',
             [[EscapeOperation::JavaScriptValue]],
         ];
+        yield 'division after postfix increment' => [
+            '<script>const result = count++ / {{ value }};</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'division after postfix decrement' => [
+            '<script>const result = count-- / {{ value }};</script>',
+            [[EscapeOperation::JavaScriptValue]],
+        ];
         yield 'division after a serialized value' => [
             '<script>const result = {{ first }}/{{ second }};</script>',
             [[EscapeOperation::JavaScriptValue], [EscapeOperation::JavaScriptValue]],
@@ -1252,6 +1260,7 @@ class LinterTest extends TestCase
     {
         yield 'identifier token' => ['<script>identifier{{ value }}</script>'];
         yield 'unknown slash after a closing brace' => ['<script>{}/{{ value }}/</script>'];
+        yield 'slash after a closing parenthesis' => ['<script>if (ready) /{{ value }}/.test(input);</script>'];
         yield 'escaped string position' => ['<script>"\\{{ value }}"</script>'];
         yield 'template interpolation candidate' => ['<script>`${{ value }}`</script>'];
         yield 'event-handler character reference' => ['<button onclick="value=&quot;{{ value }}&quot;">'];

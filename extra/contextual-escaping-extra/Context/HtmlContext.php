@@ -265,8 +265,11 @@ final class HtmlContext
         if (null === $this->javaScriptContext) {
             return $this;
         }
-        if (JavaScriptState::Minus === $this->javaScriptContext->getState()) {
+        if (\in_array($this->javaScriptContext->getState(), [JavaScriptState::Plus, JavaScriptState::Minus], true)) {
             return $this->withJavaScriptContext($this->javaScriptContext->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp));
+        }
+        if (JavaScriptState::ClosingParenthesis === $this->javaScriptContext->getState()) {
+            return $this->withJavaScriptContext($this->javaScriptContext->withState(JavaScriptState::Code, JavaScriptSlashContext::Division));
         }
         if (JavaScriptState::Slash !== $this->javaScriptContext->getState()) {
             return $this;

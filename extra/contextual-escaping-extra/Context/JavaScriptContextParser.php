@@ -125,11 +125,26 @@ final class JavaScriptContextParser
                     }
                     $context = $context->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp);
                     continue 2;
+                case JavaScriptState::Plus:
+                    if ('+' === $character) {
+                        return $context->withState(JavaScriptState::Code, JavaScriptSlashContext::Division === $context->getSlashContext() ? JavaScriptSlashContext::Division : JavaScriptSlashContext::RegExp);
+                    }
+                    $context = $context->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp);
+                    continue 2;
                 case JavaScriptState::Minus:
                     if ('-' === $character) {
-                        return $context->withState(JavaScriptState::HtmlCloseCommentDashDash);
+                        return JavaScriptSlashContext::Division === $context->getSlashContext() ? $context->withState(JavaScriptState::Code, JavaScriptSlashContext::Division) : $context->withState(JavaScriptState::HtmlCloseCommentDashDash);
                     }
-                    $context = $context->withState(JavaScriptState::Code);
+                    $context = $context->withState(JavaScriptState::Code, JavaScriptSlashContext::RegExp);
+                    continue 2;
+                case JavaScriptState::ClosingParenthesis:
+                    if ($this->isWhitespace($character)) {
+                        return $context;
+                    }
+                    if ('/' === $character) {
+                        return $context->withState(JavaScriptState::Slash, JavaScriptSlashContext::Unknown);
+                    }
+                    $context = $context->withState(JavaScriptState::Code, JavaScriptSlashContext::Division);
                     continue 2;
                 case JavaScriptState::HtmlCloseCommentDashDash:
                     if ('>' === $character) {
@@ -208,12 +223,13 @@ final class JavaScriptContextParser
             case '}':
                 return $context->isInTemplateExpression() ? $context->closeTemplateExpressionBrace() : $context->withSlashContext(JavaScriptSlashContext::Unknown);
             case ')':
+                return $context->withState(JavaScriptState::ClosingParenthesis, JavaScriptSlashContext::Division);
             case ']':
                 return $context->withSlashContext(JavaScriptSlashContext::Division);
             case '+':
-                return $context->withSlashContext(JavaScriptSlashContext::Division === $context->getSlashContext() ? JavaScriptSlashContext::Unknown : JavaScriptSlashContext::RegExp);
+                return $context->withState(JavaScriptState::Plus);
             case '-':
-                return $context->withState(JavaScriptState::Minus, JavaScriptSlashContext::RegExp);
+                return $context->withState(JavaScriptState::Minus);
             case '(':
             case '[':
             case ',':
