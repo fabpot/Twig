@@ -1062,6 +1062,8 @@ class LinterTest extends TestCase
         yield 'escaped position' => ['<style>.notice { color: \\{{ value }}; }</style>'];
         yield 'between a URL value and closing parenthesis' => ['<style>.notice { background: url("image" {{ value }}); }</style>'];
         yield 'invalid unquoted URL' => ['<style>.notice { background: url(image"{{ value }}); }</style>'];
+        yield 'escaped URL function' => ['<style>.notice { background: \\75rl({{ value }}); }</style>'];
+        yield 'escaped import keyword' => ['<style>@\\69mport "{{ value }}";</style>'];
         yield 'style attribute character reference' => ['<div style="content: &quot;{{ value }}&quot;">'];
     }
 

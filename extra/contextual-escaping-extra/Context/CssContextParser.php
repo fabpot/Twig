@@ -32,7 +32,7 @@ final class CssContextParser
                 continue;
             }
 
-            if ("\0" === $character) {
+            if ("\0" === $character || ('\\' === $character && \in_array($context->getState(), [CssState::Selector, CssState::Import, CssState::PropertyName, CssState::Value], true))) {
                 return $context->withState(CssState::Unknown);
             }
 
@@ -66,9 +66,6 @@ final class CssContextParser
                     }
                     if ("'" === $character) {
                         return $context->withState(CssState::SingleQuotedString, CssState::Selector);
-                    }
-                    if ('\\' === $character) {
-                        return $context->withEscapeDigits(0);
                     }
                     if ('{' === $character) {
                         return $context->withDeclarationDepth(1 + $context->getDeclarationDepth())->withState(CssState::PropertyName, CssState::PropertyName);
@@ -105,9 +102,6 @@ final class CssContextParser
                     if (';' === $character) {
                         return $context->withState(CssState::Selector, CssState::Selector);
                     }
-                    if ('\\' === $character) {
-                        return $context->withState(CssState::Unknown);
-                    }
 
                     return $context;
 
@@ -130,9 +124,6 @@ final class CssContextParser
                     }
                     if ("'" === $character) {
                         return $context->withState(CssState::SingleQuotedString, CssState::PropertyName);
-                    }
-                    if ('\\' === $character) {
-                        return $context->withEscapeDigits(0);
                     }
                     if (':' === $character) {
                         return $context->withState(CssState::Value, CssState::Value);
@@ -168,9 +159,6 @@ final class CssContextParser
                     }
                     if ("'" === $character) {
                         return $context->withState(CssState::SingleQuotedString, CssState::Value);
-                    }
-                    if ('\\' === $character) {
-                        return $context->withEscapeDigits(0);
                     }
                     if ('(' === $character) {
                         return $context->withParenthesisDepth(1 + $context->getParenthesisDepth());
