@@ -49,7 +49,7 @@ final class StaticExpressionAnalyzer
         }
 
         if ($expression instanceof ContextVariable || $expression instanceof LocalVariable) {
-            return $variables[$this->getVariableKey($expression)] ?? null;
+            return $variables[VariableKey::fromVariable($expression)] ?? null;
         }
 
         if ($expression instanceof ArrayExpression) {
@@ -364,10 +364,5 @@ final class StaticExpressionAnalyzer
         }
 
         return 'static expression';
-    }
-
-    private function getVariableKey(ContextVariable|LocalVariable $variable): string
-    {
-        return $variable instanceof LocalVariable ? 'local:'.spl_object_id($variable) : 'context:'.$variable->getAttribute('name');
     }
 }

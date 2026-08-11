@@ -832,7 +832,7 @@ final class Analyzer
             }
             $valueContentTypes = $this->inferContentTypes($pair['value'], new HtmlContext());
             if (!$valueContentTypes->isPlainText()) {
-                $contentTypes['context:'.$name] = $valueContentTypes;
+                $contentTypes[VariableKey::fromContextName($name)] = $valueContentTypes;
             }
         }
 
@@ -865,7 +865,7 @@ final class Analyzer
             if (null === $name || !$pair['value'] instanceof AbstractExpression || null === $value = $this->staticExpressionAnalyzer?->analyze($pair['value'], $this->staticValues)) {
                 continue;
             }
-            $staticValues['context:'.$name] = $value->withProvenance($name);
+            $staticValues[VariableKey::fromContextName($name)] = $value->withProvenance($name);
         }
 
         return $staticValues;
@@ -1106,7 +1106,7 @@ final class Analyzer
     private function inferContentTypes(AbstractExpression $expression, HtmlContext $context): ContentTypeSet
     {
         if ($expression instanceof ContextVariable || $expression instanceof LocalVariable) {
-            return $this->contentTypes[$this->getVariableKey($expression)] ?? new ContentTypeSet([ContentType::PlainText]);
+            return $this->contentTypes[VariableKey::fromVariable($expression)] ?? new ContentTypeSet([ContentType::PlainText]);
         }
 
         if ($expression instanceof GetAttrExpression) {
@@ -1381,7 +1381,7 @@ final class Analyzer
                 continue;
             }
             $name = $name->getAttribute('value');
-            $key = 'context:'.$name;
+            $key = VariableKey::fromContextName($name);
             $this->contentTypes = $inputContentTypes;
             $valueContentTypes = $this->inferContentTypes($value, new HtmlContext());
             if ($valueContentTypes->isPlainText()) {
@@ -1472,7 +1472,7 @@ final class Analyzer
             if (!$name instanceof ContextVariable && !$name instanceof LocalVariable) {
                 continue;
             }
-            $key = $this->getVariableKey($name);
+            $key = VariableKey::fromVariable($name);
             $type = $contentTypes[$index] ?? new ContentTypeSet([ContentType::PlainText]);
             if ($type->isPlainText()) {
                 unset($this->contentTypes[$key]);
@@ -1485,7 +1485,7 @@ final class Analyzer
     private function removeAssignedInferences(Node $target): void
     {
         if ($target->hasAttribute('name') && \is_string($target->getAttribute('name'))) {
-            $key = 'context:'.$target->getAttribute('name');
+            $key = VariableKey::fromContextName($target->getAttribute('name'));
             unset($this->staticValues[$key], $this->contentTypes[$key]);
         }
         foreach ($target as $child) {
@@ -1505,7 +1505,7 @@ final class Analyzer
             if (!$name instanceof ContextVariable && !$name instanceof LocalVariable) {
                 continue;
             }
-            $key = $this->getVariableKey($name);
+            $key = VariableKey::fromVariable($name);
             $value = $values[$index] ?? null;
             if (null === $value) {
                 unset($this->staticValues[$key]);
@@ -1518,11 +1518,6 @@ final class Analyzer
     private function getCurrentBlockName(): ?string
     {
         return $this->blockStack ? $this->blockStack[\count($this->blockStack) - 1]['name'] : null;
-    }
-
-    private function getVariableKey(ContextVariable|LocalVariable $variable): string
-    {
-        return $variable instanceof LocalVariable ? 'local:'.spl_object_id($variable) : 'context:'.$variable->getAttribute('name');
     }
 
     /**
@@ -1608,7 +1603,7 @@ final class Analyzer
         }
         if (NodeType::ContextPreserving === $type) {
             foreach ($this->nodeAnalyzerRegistry?->getVariableContentTypes($node) ?? [] as $name => $contentTypes) {
-                $this->contentTypes['context:'.$name] = $contentTypes;
+                $this->contentTypes[VariableKey::fromContextName($name)] = $contentTypes;
             }
 
             return $context;
