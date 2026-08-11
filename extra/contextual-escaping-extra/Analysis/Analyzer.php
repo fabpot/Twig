@@ -1631,8 +1631,8 @@ final class Analyzer
 
         $inputContentTypes = $this->contentTypes;
         $inputStaticValues = $this->staticValues;
-        $this->removeAssignedStaticValues($node->getNode('key_target'));
-        $this->removeAssignedStaticValues($node->getNode('value_target'));
+        $this->removeAssignedInferences($node->getNode('key_target'));
+        $this->removeAssignedInferences($node->getNode('value_target'));
         $bodyContext = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
         $bodyContentTypes = $this->contentTypes;
         $bodyStaticValues = $this->staticValues;
@@ -1808,13 +1808,14 @@ final class Analyzer
         }
     }
 
-    private function removeAssignedStaticValues(Node $target): void
+    private function removeAssignedInferences(Node $target): void
     {
         if ($target->hasAttribute('name') && \is_string($target->getAttribute('name'))) {
-            unset($this->staticValues['context:'.$target->getAttribute('name')]);
+            $key = 'context:'.$target->getAttribute('name');
+            unset($this->staticValues[$key], $this->contentTypes[$key]);
         }
         foreach ($target as $child) {
-            $this->removeAssignedStaticValues($child);
+            $this->removeAssignedInferences($child);
         }
     }
 

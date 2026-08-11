@@ -328,6 +328,14 @@ class LinterTest extends TestCase
         $this->assertSame([[EscapeOperation::CssValue]], $this->getPlans($result));
     }
 
+    public function testDoesNotReuseAContentTypeShadowedByALoopTarget(): void
+    {
+        $result = $this->lint('{% set url = "/a"|e("url") %}{% for url in urls %}<a href="{{ url }}">x</a>{% endfor %}');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]], $this->getPlans($result));
+    }
+
     public function testLimitsFiniteStaticValues(): void
     {
         $values = implode(', ', array_map(static fn (int $value): string => '"'.$value.'"', range(0, FiniteStaticValueSet::MAX_VALUES)));
