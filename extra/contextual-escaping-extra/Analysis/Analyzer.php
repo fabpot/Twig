@@ -902,7 +902,7 @@ final class Analyzer
             return $this->contextAfterUnsupportedPrint($context);
         }
 
-        $this->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContract: $this->collectValueContracts($expression)));
+        $this->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContracts: $this->collectValueContracts($expression)));
         $operations = $plan->getOperations();
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
@@ -1181,23 +1181,32 @@ final class Analyzer
     }
 
     /**
-     * @return list<string>
+     * @return list<ValueContract>
      */
     private function collectValueContracts(Node $node): array
     {
         $contracts = [];
         if ($node instanceof FunctionExpression && null !== $analysis = $this->callableAnalyzerRegistry?->analyze($node)) {
-            $contracts = $analysis->getProvenance();
+            $contract = $analysis->getValueContract();
+            $contracts[$this->getValueContractKey($contract)] = $contract;
         }
         foreach ($node as $child) {
-            foreach ($this->collectValueContracts($child) as $step) {
-                if (!\in_array($step, $contracts, true)) {
-                    $contracts[] = $step;
-                }
+            foreach ($this->collectValueContracts($child) as $contract) {
+                $contracts[$this->getValueContractKey($contract)] = $contract;
             }
         }
 
-        return $contracts;
+        return array_values($contracts);
+    }
+
+    private function getValueContractKey(ValueContract $contract): string
+    {
+        return implode("\0", [
+            $contract->getExpression(),
+            $contract->getImplementation(),
+            $contract->getContentType()->name,
+            $contract->getSource(),
+        ]);
     }
 
     /**
@@ -2134,7 +2143,7 @@ final class Analyzer
             $inferredEscape->getContext(),
             $inferredEscape->getProvenance(),
             $inferredEscape->getStaticOutputs(),
-            $inferredEscape->getValueContract(),
+            $inferredEscape->getValueContracts(),
         ]);
         $duplicate = false;
         foreach (array_keys($this->alternativeInferenceFrames) as $index) {

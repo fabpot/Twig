@@ -19,6 +19,7 @@ use Twig\Error\SyntaxError;
 use Twig\Extension\ProfilerExtension;
 use Twig\Extra\ContextualEscaping\Analysis\AnalysisResult;
 use Twig\Extra\ContextualEscaping\Analysis\Analyzer;
+use Twig\Extra\ContextualEscaping\Analysis\ContentType;
 use Twig\Extra\ContextualEscaping\Analysis\DiagnosticCode;
 use Twig\Extra\ContextualEscaping\Analysis\EscapeOperation;
 use Twig\Extra\ContextualEscaping\Analysis\FiniteStaticValueSet;
@@ -1975,11 +1976,12 @@ class LinterTest extends TestCase
             [EscapeOperation::UrlNormalize, EscapeOperation::CssString],
             [EscapeOperation::HtmlAttribute],
         ], $this->getPlans($result));
-        $this->assertSame([
-            'asset()',
-            'Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl',
-            'Url',
-        ], $result->getInferredEscapes()[1]->getValueContract());
+        $contracts = $result->getInferredEscapes()[1]->getValueContracts();
+        $this->assertCount(1, $contracts);
+        $this->assertSame('asset()', $contracts[0]->getExpression());
+        $this->assertSame('Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl', $contracts[0]->getImplementation());
+        $this->assertSame(ContentType::Url, $contracts[0]->getContentType());
+        $this->assertSame('Symfony integration', $contracts[0]->getSource());
     }
 
     public function testDoesNotTrustSymfonyFunctionNamesWithOtherCallables(): void

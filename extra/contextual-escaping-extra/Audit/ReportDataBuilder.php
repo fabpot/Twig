@@ -26,10 +26,10 @@ final class ReportDataBuilder
     }
 
     /**
-     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, value_contract: list<string>}> $plans
-     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                                                                                                        $diagnostics
-     * @param array<string, int>                                                                                                                                                                                                                                                                                                                                                                                                $unsupportedNodes
-     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                                                                                                              $summary
+     * @param list<array{template: string, path: string|null, line: int, operations: list<string>, context: string, current: string, correct: bool, expression: string|null, plain_variable: bool, current_safe: list<string>, current_escapes: list<array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool}>, provenance: list<string>, static_output_count: int, value_contracts: list<array{expression: string, implementation: string, content_type: string, source: string}>}> $plans
+     * @param list<array{template: string, path: string|null, line: int, code: string, message: string}>                                                                                                                                                                                                                                                                                                                                                                                                          $diagnostics
+     * @param array<string, int>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  $unsupportedNodes
+     * @param array{templates: int, output_sites: int, correct_plans: int, incorrect_plans: int, diagnostics: int}                                                                                                                                                                                                                                                                                                                                                                                                $summary
      *
      * @return array<string, mixed>
      */
@@ -49,6 +49,7 @@ final class ReportDataBuilder
             $contextReason = 'proven' === $assessment['status']
                 ? \sprintf('%d possible static output%s %s analyzed directly in %s.', $plan['static_output_count'], 1 === $plan['static_output_count'] ? '' : 's', 1 === $plan['static_output_count'] ? 'was' : 'were', $plan['context'])
                 : $this->findingAssessor->describeContextReason($plan['context']);
+            $valueContracts = array_map($this->describeValueContract(...), $plan['value_contracts']);
             $search = strtolower(implode(' ', [
                 $plan['template'],
                 $plan['line'],
@@ -57,7 +58,7 @@ final class ReportDataBuilder
                 $plan['context'],
                 $contextReason,
                 implode(' ', $plan['provenance']),
-                implode(' ', $plan['value_contract']),
+                implode(' ', array_map(static fn (array $contract): string => implode(' ', $contract), $valueContracts)),
                 $current,
                 implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
                 $assessment['label'],
@@ -75,6 +76,7 @@ final class ReportDataBuilder
                 'search' => $search,
                 'source' => $this->sourceExcerptBuilder->create($plan['path'], $plan['line'], $plan['expression']),
                 ...$plan,
+                'value_contracts' => $valueContracts,
             ];
             $templateOwnership[$plan['template']] = $ownership;
             ++$assessmentCounts[$assessment['status']];
@@ -146,6 +148,59 @@ final class ReportDataBuilder
             'templates' => $templates,
             'unsupported_nodes' => $unsupported,
         ];
+    }
+
+    /**
+     * @param array{expression: string, implementation: string, content_type: string, source: string} $contract
+     *
+     * @return array{expression: string, implementation: string, content_type: string, source: string, result_label: string, meaning: string, effect: string}
+     */
+    private function describeValueContract(array $contract): array
+    {
+        [$meaning, $effect] = match ($contract['content_type']) {
+            'Url' => [
+                'The result represents an entire URL value, not an individual path, query, or fragment component.',
+                'The result is analyzed as a complete URL rather than plain text. At a URL start, no scheme filter is added. The required pipeline still includes any encoding needed by the surrounding context.',
+            ],
+            'Html' => [
+                'The result is trusted as an HTML fragment rather than plain text.',
+                'HTML text escaping is not added. The required pipeline still includes any protection needed when the fragment is embedded in another context.',
+            ],
+            default => [
+                \sprintf('The result carries the %s semantic content type rather than plain text.', $this->getContentTypeLabel($contract['content_type'])),
+                'The required pipeline already accounts for this contract and still includes any operations needed by the surrounding output context.',
+            ],
+        };
+
+        return [
+            ...$contract,
+            'result_label' => $this->getContentTypeLabel($contract['content_type']),
+            'meaning' => $meaning,
+            'effect' => $effect,
+        ];
+    }
+
+    private function getContentTypeLabel(string $contentType): string
+    {
+        return match ($contentType) {
+            'PlainText' => 'Plain text',
+            'TrustedInnermost' => 'Trusted innermost content',
+            'Html' => 'HTML fragment',
+            'HtmlAttributeList' => 'HTML attribute list',
+            'HtmlAttribute' => 'Quoted HTML attribute value',
+            'HtmlAttributeUnquoted' => 'Unquoted HTML attribute value',
+            'HtmlRcdata' => 'HTML RCDATA',
+            'JavaScriptExpression' => 'JavaScript expression',
+            'JavaScriptString' => 'JavaScript string',
+            'JavaScriptTemplateString' => 'JavaScript template string',
+            'JavaScriptRegExp' => 'JavaScript regular expression',
+            'Css' => 'CSS',
+            'CssString' => 'CSS string',
+            'Url' => 'Complete URL',
+            'UrlComponent' => 'URL component',
+            'Srcset' => 'srcset value',
+            default => $contentType,
+        };
     }
 
     /**

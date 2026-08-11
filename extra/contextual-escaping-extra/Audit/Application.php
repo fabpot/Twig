@@ -16,6 +16,7 @@ use Twig\Error\LoaderError;
 use Twig\Extra\ContextualEscaping\Analysis\CurrentEscapingSafetyAnalyzer;
 use Twig\Extra\ContextualEscaping\Analysis\DiagnosticCode;
 use Twig\Extra\ContextualEscaping\Analysis\EscapeOperation;
+use Twig\Extra\ContextualEscaping\Analysis\ValueContract;
 use Twig\Extra\ContextualEscaping\Linter;
 use Twig\Node\Expression\AbstractExpression;
 use Twig\Node\Expression\ConstantExpression;
@@ -106,7 +107,12 @@ final class Application
                     'current_escapes' => $currentEscapes,
                     'provenance' => $provenance,
                     'static_output_count' => \count($inferredEscape->getStaticOutputs()),
-                    'value_contract' => $inferredEscape->getValueContract(),
+                    'value_contracts' => array_map(static fn (ValueContract $contract): array => [
+                        'expression' => $contract->getExpression(),
+                        'implementation' => $contract->getImplementation(),
+                        'content_type' => $contract->getContentType()->name,
+                        'source' => $contract->getSource(),
+                    ], $inferredEscape->getValueContracts()),
                 ];
                 if ($operations) {
                     printf(

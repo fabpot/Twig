@@ -73,11 +73,21 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .operation { background: var(--bg); border: 1px solid var(--border); }
 .capability { color: var(--accent); background: var(--accent-bg); }
 .ownership { color: var(--muted); background: var(--bg); border: 1px solid var(--border); }
-.guidance, .context-reason, .provenance { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
-.guidance strong, .context-reason strong, .provenance > strong { display: block; margin-bottom: 2px; }
+.guidance, .context-reason, .provenance, .value-contracts { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
+.guidance strong, .context-reason strong, .provenance > strong, .value-contracts > strong { display: block; margin-bottom: 2px; }
 .guidance span, .context-reason span { color: var(--muted); }
 .provenance ol { margin: 6px 0 0; padding-left: 24px; color: var(--muted); }
 .provenance li + li { margin-top: 2px; }
+.value-contract + .value-contract { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.value-contract-summary { margin: 5px 0 8px; }
+.contract-result { color: var(--accent); background: var(--accent-bg); }
+.value-contract dl { display: grid; gap: 5px; margin: 0; }
+.value-contract dl div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
+.value-contract dt { color: var(--muted); }
+.value-contract dd { margin: 0; overflow-wrap: anywhere; }
+.contract-effect { margin: 9px 0 0; padding: 7px 9px; border-left: 3px solid var(--accent); background: var(--panel); }
+.contract-effect strong { display: block; }
+.contract-effect span { color: var(--muted); }
 .pipeline-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
 .pipeline { min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .pipeline > strong { display: block; margin-bottom: 7px; }

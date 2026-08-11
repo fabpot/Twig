@@ -15,6 +15,7 @@ use Twig\Extra\ContextualEscaping\Analysis\CallableAnalysis;
 use Twig\Extra\ContextualEscaping\Analysis\CallableAnalyzerInterface;
 use Twig\Extra\ContextualEscaping\Analysis\ContentType;
 use Twig\Extra\ContextualEscaping\Analysis\ContentTypeSet;
+use Twig\Extra\ContextualEscaping\Analysis\ValueContract;
 use Twig\Node\Expression\FunctionExpression;
 use Twig\TwigFunction;
 
@@ -42,7 +43,7 @@ final class SymfonyCallableAnalyzer implements CallableAnalyzerInterface
 
         return null === $contentType ? null : new CallableAnalysis(
             new ContentTypeSet([$contentType]),
-            [$function->getName().'()', $identity, $contentType->name],
+            new ValueContract($function->getName().'()', $identity, $contentType, 'Symfony integration'),
         );
     }
 

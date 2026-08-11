@@ -79,7 +79,12 @@ final class LinterScriptTest extends TestCase
             $this->assertStringContainsString('<strong>Why no escaping is required</strong><span>2 possible static outputs were analyzed directly in CSS Value.</span>', $html);
             $this->assertStringContainsString('<strong>Value provenance</strong><ol><li><code>color</code></li><li><code>random(colors)|first</code></li><li><code>random(colors)</code></li><li><code>colors</code></li><li><code>fixed local array</code></li></ol>', $html);
             $this->assertStringContainsString('<strong>Required pipeline</strong><span class="pipeline-empty">No escaping required</span>', $html);
-            $this->assertStringContainsString('<strong>Value contract</strong><ol><li><code>asset()</code></li><li><code>Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl</code></li><li><code>Url</code></li></ol>', $html);
+            $this->assertStringContainsString('<strong>Why the analyzer trusts this value</strong>', $html);
+            $this->assertStringContainsString('<code>asset()</code> is treated as <span class="badge contract-result">Complete URL</span> instead of plain text.', $html);
+            $this->assertStringContainsString('<dt>Recognized by</dt><dd>Symfony integration</dd>', $html);
+            $this->assertStringContainsString('<dt>Resolved callable</dt><dd><code>Symfony\\Bridge\\Twig\\Extension\\AssetExtension::getAssetUrl</code></dd>', $html);
+            $this->assertStringContainsString('<dt>Guarantee</dt><dd>The result represents an entire URL value, not an individual path, query, or fragment component.</dd>', $html);
+            $this->assertStringContainsString('<strong>Effect on this finding</strong><span>The result is analyzed as a complete URL rather than plain text. At a URL start, no scheme filter is added. The required pipeline still includes any encoding needed by the surrounding context.</span>', $html);
             $this->assertStringContainsString('data-ownership="application"', $html);
             $this->assertStringContainsString('data-ownership="dependency"', $html);
             $this->assertLessThan(strpos($html, '@Dependency/link.html.twig'), strpos($html, 'contextual.html.twig'));

@@ -19,9 +19,9 @@ use Twig\Node\PrintNode;
 final class InferredEscape
 {
     /**
-     * @param list<string> $provenance
-     * @param list<string> $staticOutputs
-     * @param list<string> $valueContract
+     * @param list<string>        $provenance
+     * @param list<string>        $staticOutputs
+     * @param list<ValueContract> $valueContracts
      */
     public function __construct(
         private PrintNode $node,
@@ -29,7 +29,7 @@ final class InferredEscape
         private string $context = 'an unknown context',
         private array $provenance = [],
         private array $staticOutputs = [],
-        private array $valueContract = [],
+        private array $valueContracts = [],
     ) {
     }
 
@@ -65,10 +65,10 @@ final class InferredEscape
     }
 
     /**
-     * @return list<string>
+     * @return list<ValueContract>
      */
-    public function getValueContract(): array
+    public function getValueContracts(): array
     {
-        return $this->valueContract;
+        return $this->valueContracts;
     }
 }

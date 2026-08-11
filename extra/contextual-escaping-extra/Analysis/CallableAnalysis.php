@@ -18,12 +18,9 @@ namespace Twig\Extra\ContextualEscaping\Analysis;
  */
 final class CallableAnalysis
 {
-    /**
-     * @param non-empty-list<string> $provenance
-     */
     public function __construct(
         private ContentTypeSet $contentTypes,
-        private array $provenance,
+        private ValueContract $valueContract,
     ) {
     }
 
@@ -32,11 +29,8 @@ final class CallableAnalysis
         return $this->contentTypes;
     }
 
-    /**
-     * @return non-empty-list<string>
-     */
-    public function getProvenance(): array
+    public function getValueContract(): ValueContract
     {
-        return $this->provenance;
+        return $this->valueContract;
     }
 }
