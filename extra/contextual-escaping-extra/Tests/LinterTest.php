@@ -2074,11 +2074,23 @@ TWIG;
         $this->assertSame([DiagnosticCode::UnsupportedStructuralInterpolation], $this->getDiagnosticCodes($result));
     }
 
-    public function testRejectsMalformedTrustedAttributeMapRenderers(): void
+    /**
+     * @dataProvider provideMalformedTrustedAttributeMapRenderers
+     */
+    #[DataProvider('provideMalformedTrustedAttributeMapRenderers')]
+    public function testRejectsMalformedTrustedAttributeMapRenderers(string $template): void
     {
-        $result = $this->lint('<link {% for attr, value in css_asset.htmlAttributes %} {{ attr }}={{ value|e("html") }}{% endfor %}>', '@EasyAdmin/includes/_css_assets.html.twig');
+        $result = $this->lint($template, '@EasyAdmin/includes/_css_assets.html.twig');
 
         $this->assertSame([DiagnosticCode::UnsupportedStructuralInterpolation], $this->getDiagnosticCodes($result));
+    }
+
+    public static function provideMalformedTrustedAttributeMapRenderers(): iterable
+    {
+        yield 'unquoted attribute' => ['<link {% for attr, value in css_asset.htmlAttributes %} {{ attr }}={{ value|e("html") }}{% endfor %}>'];
+        yield 'static delimiter output' => [<<<'TWIG'
+            <link {% for attr, value in css_asset.htmlAttributes %} {{ attr }}="{{ condition ? '"' : value|e('html') }}"{% endfor %}>
+            TWIG];
     }
 
     public function testAnalyzesSupportedSymfonyBridgeNodes(): void

@@ -68,11 +68,8 @@ final class HtmlAttributeMapLoopShapeAnalyzer
         }
         if ($node instanceof PrintNode) {
             $expression = $node->getNode('expr');
-            if (!$expression instanceof AbstractExpression || !$this->isHtmlEscaped($expression)) {
-                return null;
-            }
 
-            return [$this->isVariable($expression, $keyName) ? self::KEY : self::VALUE];
+            return $expression instanceof AbstractExpression ? $this->renderExpression($expression, $keyName) : null;
         }
         if ($node instanceof IfNode) {
             $outputs = [];
@@ -119,6 +116,43 @@ final class HtmlAttributeMapLoopShapeAnalyzer
         }
 
         return $outputs;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    private function renderExpression(AbstractExpression $expression, string $keyName): ?array
+    {
+        if ($expression instanceof ConstantExpression && !$expression->isDefinedTestEnabled()) {
+            $value = $expression->getAttribute('value');
+            if (null === $value || false === $value) {
+                return [''];
+            }
+            if (true === $value) {
+                return ['1'];
+            }
+
+            return \is_string($value) || \is_int($value) || \is_float($value) ? [(string) $value] : null;
+        }
+        if ($expression instanceof OperatorEscapeInterface) {
+            $outputs = [];
+            foreach ($expression->getOperandNamesToEscape() as $name) {
+                $operand = $expression->getNode($name);
+                if (!$operand instanceof AbstractExpression || null === $operandOutputs = $this->renderExpression($operand, $keyName)) {
+                    return null;
+                }
+                foreach ($operandOutputs as $output) {
+                    $outputs[serialize($output)] = $output;
+                }
+            }
+
+            return array_values($outputs);
+        }
+        if (!$this->isHtmlEscaped($expression)) {
+            return null;
+        }
+
+        return [$this->isVariable($expression, $keyName) ? self::KEY : self::VALUE];
     }
 
     private function isVariable(AbstractExpression $expression, string $name): bool
