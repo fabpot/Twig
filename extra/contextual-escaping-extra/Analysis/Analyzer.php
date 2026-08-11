@@ -785,8 +785,7 @@ final class Analyzer
         $this->activeMacros[$key] = $context;
         $contentTypes = $this->contentTypes;
         $staticValues = $this->staticValues;
-        $argumentContentTypes = $this->getMacroArgumentContentTypes($node, $macro);
-        $argumentStaticValues = $this->getMacroArgumentStaticValues($node, $macro);
+        [$argumentContentTypes, $argumentStaticValues] = $this->getMacroArgumentInferences($node, $macro);
         $contexts = [];
         foreach ($scopes as $scope) {
             $this->compositionScopes[] = $scope;
@@ -805,14 +804,14 @@ final class Analyzer
     }
 
     /**
-     * @return array<string, ContentTypeSet>
+     * @return array{array<string, ContentTypeSet>, array<string, FiniteStaticValueSet>}
      */
-    private function getMacroArgumentContentTypes(MacroReferenceExpression $reference, MacroNode $macro): array
+    private function getMacroArgumentInferences(MacroReferenceExpression $reference, MacroNode $macro): array
     {
         $macroArguments = $macro->getNode('arguments');
         $referenceArguments = $reference->getNode('arguments');
         if (!$macroArguments instanceof ArrayExpression || !$referenceArguments instanceof ArrayExpression) {
-            return [];
+            return [[], []];
         }
 
         $parameters = [];
@@ -824,51 +823,24 @@ final class Analyzer
         }
 
         $contentTypes = [];
+        $staticValues = [];
         foreach ($referenceArguments->getKeyValuePairs() as $index => $pair) {
             $name = $pair['key']->getAttribute('name');
             $name = \is_string($name) ? $name : ($parameters[$index] ?? null);
             if (null === $name || !$pair['value'] instanceof AbstractExpression) {
                 continue;
             }
+            $key = VariableKey::fromContextName($name);
             $valueContentTypes = $this->inferContentTypes($pair['value'], new HtmlContext());
             if (!$valueContentTypes->isPlainText()) {
-                $contentTypes[VariableKey::fromContextName($name)] = $valueContentTypes;
+                $contentTypes[$key] = $valueContentTypes;
+            }
+            if (null !== $value = $this->staticExpressionAnalyzer?->analyze($pair['value'], $this->staticValues)) {
+                $staticValues[$key] = $value->withProvenance($name);
             }
         }
 
-        return $contentTypes;
-    }
-
-    /**
-     * @return array<string, FiniteStaticValueSet>
-     */
-    private function getMacroArgumentStaticValues(MacroReferenceExpression $reference, MacroNode $macro): array
-    {
-        $macroArguments = $macro->getNode('arguments');
-        $referenceArguments = $reference->getNode('arguments');
-        if (!$macroArguments instanceof ArrayExpression || !$referenceArguments instanceof ArrayExpression) {
-            return [];
-        }
-
-        $parameters = [];
-        foreach ($macroArguments->getKeyValuePairs() as $pair) {
-            $name = $pair['key']->getAttribute('name');
-            if (\is_string($name)) {
-                $parameters[] = $name;
-            }
-        }
-
-        $staticValues = [];
-        foreach ($referenceArguments->getKeyValuePairs() as $index => $pair) {
-            $name = $pair['key']->getAttribute('name');
-            $name = \is_string($name) ? $name : ($parameters[$index] ?? null);
-            if (null === $name || !$pair['value'] instanceof AbstractExpression || null === $value = $this->staticExpressionAnalyzer?->analyze($pair['value'], $this->staticValues)) {
-                continue;
-            }
-            $staticValues[VariableKey::fromContextName($name)] = $value->withProvenance($name);
-        }
-
-        return $staticValues;
+        return [$contentTypes, $staticValues];
     }
 
     private function findMacroNode(Node $node, string $name): ?MacroNode
