@@ -228,18 +228,11 @@ final class Application
     private function getCurrentEscapingStrategies(AbstractExpression $expression): array
     {
         if ($expression instanceof FilterExpression) {
-            $filter = $expression->getAttribute('twig_callable');
-            if ($filter instanceof TwigFilter && \in_array($filter->getName(), ['e', 'escape'], true)) {
-                $arguments = $expression->getNode('arguments');
-                if (!\count($arguments)) {
-                    return ['html'];
-                }
-
-                $strategy = $arguments->getNode(0);
-
-                return [$strategy instanceof ConstantExpression && \is_string($strategy->getAttribute('value')) ? $strategy->getAttribute('value') : 'dynamic'];
+            if (null !== $strategy = $this->getEscapeStrategy($expression)) {
+                return [$strategy];
             }
 
+            $filter = $expression->getAttribute('twig_callable');
             $input = $expression->getNode('node');
             if (!$filter instanceof TwigFilter || !$input instanceof AbstractExpression) {
                 return [];
@@ -293,33 +286,39 @@ final class Application
         }
         $seen[$id] = true;
 
-        if ($node instanceof FilterExpression) {
-            $filter = $node->getAttribute('twig_callable');
-            if ($filter instanceof TwigFilter && \in_array($filter->getName(), ['e', 'escape'], true)) {
-                $arguments = $node->getNode('arguments');
-                $strategy = 'html';
-                if (\count($arguments)) {
-                    $strategyNode = $arguments->getNode(0);
-                    $strategy = $strategyNode instanceof ConstantExpression && \is_string($strategyNode->getAttribute('value')) ? $strategyNode->getAttribute('value') : 'dynamic';
-                }
-                $input = $node->getNode('node');
-                $escapes[] = [
-                    'strategy' => $strategy,
-                    'scope' => $wholeOutput ? 'whole' : 'nested',
-                    'expression' => $input instanceof AbstractExpression ? $this->describeExpression($input) : 'expression',
-                    'automatic' => $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value'),
-                ];
-                if ($input instanceof Node) {
-                    $this->collectCurrentEscapes($input, false, $escapes, $seen);
-                }
+        if ($node instanceof FilterExpression && null !== $strategy = $this->getEscapeStrategy($node)) {
+            $arguments = $node->getNode('arguments');
+            $input = $node->getNode('node');
+            $escapes[] = [
+                'strategy' => $strategy,
+                'scope' => $wholeOutput ? 'whole' : 'nested',
+                'expression' => $input instanceof AbstractExpression ? $this->describeExpression($input) : 'expression',
+                'automatic' => $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value'),
+            ];
+            $this->collectCurrentEscapes($input, false, $escapes, $seen);
 
-                return;
-            }
+            return;
         }
 
         foreach ($node as $child) {
             $this->collectCurrentEscapes($child, false, $escapes, $seen);
         }
+    }
+
+    private function getEscapeStrategy(FilterExpression $expression): ?string
+    {
+        $filter = $expression->getAttribute('twig_callable');
+        if (!$filter instanceof TwigFilter || !\in_array($filter->getName(), ['e', 'escape'], true)) {
+            return null;
+        }
+
+        $arguments = $expression->getNode('arguments');
+        if (!\count($arguments)) {
+            return 'html';
+        }
+        $strategy = $arguments->getNode(0);
+
+        return $strategy instanceof ConstantExpression && \is_string($strategy->getAttribute('value')) ? $strategy->getAttribute('value') : 'dynamic';
     }
 
     private function describeExpression(AbstractExpression $expression): string
