@@ -46,7 +46,10 @@ final class ApplicationKernel extends Kernel
             ->setArguments([new Reference('twig.contextual_escaping.audit_loader'), ['autoescape' => 'html', 'strict_variables' => true]])
         ;
         $container->register(FindingAssessor::class);
-        $container->register(SourceExcerptBuilder::class);
+        $container->register(ExpressionLocator::class);
+        $container->register(SourceExcerptBuilder::class)
+            ->setArguments([new Reference(ExpressionLocator::class)])
+        ;
         $container->register(ReportDataBuilder::class)
             ->setArguments([new Reference(FindingAssessor::class), new Reference(SourceExcerptBuilder::class), '%kernel.project_dir%'])
         ;
@@ -66,6 +69,7 @@ final class ApplicationKernel extends Kernel
                 new Reference(HtmlReport::class),
                 new Reference(CurrentEscapingSafetyAnalyzer::class),
                 new Reference(Baseline::class),
+                new Reference(ExpressionLocator::class),
             ])
             ->setPublic(true)
         ;

@@ -18,6 +18,11 @@ namespace Twig\Extra\ContextualEscaping\Audit;
  */
 final class SourceExcerptBuilder
 {
+    public function __construct(
+        private ExpressionLocator $expressionLocator,
+    ) {
+    }
+
     /**
      * @return array{expression: string|null, uri: string|null, lines: list<array{number: int, before: string, highlight: string|null, after: string}>}|null
      */
@@ -104,7 +109,7 @@ final class SourceExcerptBuilder
                 }
             }
             if (false !== $opening = strpos($code, '{{', $lineStart)) {
-                if ($opening <= $lineEnd && null !== $closing = $this->findExpressionClosing($code, $opening + 2)) {
+                if ($opening <= $lineEnd && null !== $closing = $this->expressionLocator->findExpressionClosing($code, $opening + 2)) {
                     return [$opening, $closing + 2];
                 }
             }
@@ -136,46 +141,6 @@ final class SourceExcerptBuilder
             }
             if ('>' === $character) {
                 return $i;
-            }
-        }
-
-        return null;
-    }
-
-    private function findExpressionClosing(string $code, int $offset): ?int
-    {
-        $delimiters = [];
-        $quote = null;
-        $escaped = false;
-        $length = \strlen($code);
-        for ($i = $offset; $i < $length; ++$i) {
-            $character = $code[$i];
-            if (null !== $quote) {
-                if ($escaped) {
-                    $escaped = false;
-                } elseif ('\\' === $character) {
-                    $escaped = true;
-                } elseif ($quote === $character) {
-                    $quote = null;
-                }
-
-                continue;
-            }
-            if ('"' === $character || "'" === $character) {
-                $quote = $character;
-
-                continue;
-            }
-            if ('}' === $character && '}' === ($code[$i + 1] ?? null) && [] === $delimiters) {
-                return $i;
-            }
-            if (isset(['(' => true, '[' => true, '{' => true][$character])) {
-                $delimiters[] = $character;
-
-                continue;
-            }
-            if (isset([')' => '(', ']' => '[', '}' => '{'][$character]) && end($delimiters) === [')' => '(', ']' => '[', '}' => '{'][$character]) {
-                array_pop($delimiters);
             }
         }
 

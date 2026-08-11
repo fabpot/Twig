@@ -45,6 +45,7 @@ final class Application
         private HtmlReport $htmlReport,
         private CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer,
         private Baseline $baseline,
+        private ExpressionLocator $expressionLocator,
     ) {
     }
 
@@ -401,7 +402,7 @@ final class Application
             $offset = $opening + 2;
         }
 
-        if (1 !== \count($openings) || null === $closing = $this->findExpressionClosing($code, $openings[0] + 2)) {
+        if (1 !== \count($openings) || null === $closing = $this->expressionLocator->findExpressionClosing($code, $openings[0] + 2)) {
             $line = trim(substr($code, $lineStart, $lineEnd - $lineStart));
 
             return '' === $line ? null : $line;
@@ -417,46 +418,5 @@ final class Application
         $lines = preg_split('/\R/', $code);
 
         return $lines[$line - 1] ?? null;
-    }
-
-    private function findExpressionClosing(string $code, int $offset): ?int
-    {
-        $delimiters = [];
-        $quote = null;
-        $escaped = false;
-        $length = \strlen($code);
-
-        for ($i = $offset; $i < $length; ++$i) {
-            $character = $code[$i];
-            if (null !== $quote) {
-                if ($escaped) {
-                    $escaped = false;
-                } elseif ('\\' === $character) {
-                    $escaped = true;
-                } elseif ($quote === $character) {
-                    $quote = null;
-                }
-
-                continue;
-            }
-            if ('"' === $character || "'" === $character) {
-                $quote = $character;
-
-                continue;
-            }
-            if ('}' === $character && '}' === ($code[$i + 1] ?? null) && [] === $delimiters) {
-                return $i;
-            }
-            if (isset(['(' => true, '[' => true, '{' => true][$character])) {
-                $delimiters[] = $character;
-
-                continue;
-            }
-            if (isset([')' => '(', ']' => '[', '}' => '{'][$character]) && end($delimiters) === [')' => '(', ']' => '[', '}' => '{'][$character]) {
-                array_pop($delimiters);
-            }
-        }
-
-        return null;
     }
 }
