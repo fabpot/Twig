@@ -972,16 +972,10 @@ final class Analyzer
     {
         $outputs = [];
         foreach ($staticValues->getValues() as $value) {
-            if (null === $value || false === $value) {
-                $value = '';
-            } elseif (true === $value) {
-                $value = '1';
-            } elseif (\is_string($value) || \is_int($value) || \is_float($value)) {
-                $value = (string) $value;
-            } else {
+            if (null === $output = StaticOutput::stringify($value)) {
                 return null;
             }
-            $outputs[$value] = true;
+            $outputs[$output] = true;
         }
 
         return array_keys($outputs);
@@ -1028,17 +1022,11 @@ final class Analyzer
     {
         if ($expression instanceof ConstantExpression) {
             $value = $expression->getAttribute('value');
-            if (null === $value || false === $value) {
-                return $context;
-            }
-            if (true === $value) {
-                return $this->contextParser->consume($context, '1');
-            }
-            if (\is_string($value) || \is_int($value) || \is_float($value)) {
-                return $this->contextParser->consume($context, (string) $value);
+            if (null === $output = StaticOutput::stringify($value)) {
+                throw new \LogicException(\sprintf('Unsupported constant output of type "%s".', get_debug_type($value)));
             }
 
-            throw new \LogicException(\sprintf('Unsupported constant output of type "%s".', get_debug_type($value)));
+            return $this->contextParser->consume($context, $output);
         }
 
         if (!$expression instanceof OperatorEscapeInterface) {

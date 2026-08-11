@@ -272,8 +272,8 @@ final class StaticExpressionAnalyzer
         $values = [];
         foreach ($left->getValues() as $leftValue) {
             foreach ($right->getValues() as $rightValue) {
-                $leftValue = $this->stringify($leftValue);
-                $rightValue = $this->stringify($rightValue);
+                $leftValue = StaticOutput::stringify($leftValue);
+                $rightValue = StaticOutput::stringify($rightValue);
                 if (null === $leftValue || null === $rightValue) {
                     return null;
                 }
@@ -364,18 +364,6 @@ final class StaticExpressionAnalyzer
         }
 
         return 'static expression';
-    }
-
-    private function stringify(mixed $value): ?string
-    {
-        if (null === $value || false === $value) {
-            return '';
-        }
-        if (true === $value) {
-            return '1';
-        }
-
-        return \is_string($value) || \is_int($value) || \is_float($value) ? (string) $value : null;
     }
 
     private function getVariableKey(ContextVariable|LocalVariable $variable): string

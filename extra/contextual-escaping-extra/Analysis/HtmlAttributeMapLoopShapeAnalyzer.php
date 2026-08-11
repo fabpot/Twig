@@ -124,15 +124,9 @@ final class HtmlAttributeMapLoopShapeAnalyzer
     private function renderExpression(AbstractExpression $expression, string $keyName): ?array
     {
         if ($expression instanceof ConstantExpression && !$expression->isDefinedTestEnabled()) {
-            $value = $expression->getAttribute('value');
-            if (null === $value || false === $value) {
-                return [''];
-            }
-            if (true === $value) {
-                return ['1'];
-            }
+            $output = StaticOutput::stringify($expression->getAttribute('value'));
 
-            return \is_string($value) || \is_int($value) || \is_float($value) ? [(string) $value] : null;
+            return null === $output ? null : [$output];
         }
         if ($expression instanceof OperatorEscapeInterface) {
             $outputs = [];
