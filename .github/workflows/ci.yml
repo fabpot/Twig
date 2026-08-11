@@ -27,7 +27,7 @@ jobs:
 
         steps:
             - name: "Checkout code"
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: "Install PHP with extensions"
               uses: shivammathur/setup-php@v2
@@ -73,7 +73,7 @@ jobs:
 
         steps:
             - name: "Checkout code"
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: "Install PHP with extensions"
               uses: shivammathur/setup-php@v2
@@ -124,6 +124,7 @@ jobs:
                     - '8.5'
                 extension:
                     - 'cache-extra'
+                    - 'contextual-escaping-extra'
                     - 'cssinliner-extra'
                     - 'html-extra'
                     - 'inky-extra'
@@ -134,7 +135,7 @@ jobs:
 
         steps:
             - name: "Checkout code"
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: "Install PHP with extensions"
               uses: shivammathur/setup-php@v2
@@ -150,6 +151,11 @@ jobs:
               if: "matrix.extension == 'twig-extra-bundle'"
               working-directory: extra/${{ matrix.extension }}
               run: "composer require --no-update 'symfony/translation-contracts:^1.1|^2.0'"
+
+            - name: "Use local Twig checkout"
+              if: "matrix.extension == 'contextual-escaping-extra'"
+              working-directory: extra/${{ matrix.extension }}
+              run: composer config repositories.twig path ../..
 
             - name: "Composer install ${{ matrix.extension }}"
               working-directory: extra/${{ matrix.extension }}
@@ -178,6 +184,34 @@ jobs:
                   LANG: 'en_US.UTF-8'
               run: vendor/bin/simple-phpunit
 
+    contextual-escaping-phpstan:
+        name: "contextual-escaping-extra PHPStan"
+
+        runs-on: 'ubuntu-latest'
+
+        steps:
+            - name: "Checkout code"
+              uses: actions/checkout@v7
+
+            - name: "Install PHP with extensions"
+              uses: shivammathur/setup-php@v2
+              with:
+                  coverage: "none"
+                  php-version: '8.5'
+                  ini-values: memory_limit=-1
+
+            - name: "Use local Twig checkout"
+              working-directory: extra/contextual-escaping-extra
+              run: composer config repositories.twig path ../..
+
+            - name: "Composer install contextual-escaping-extra"
+              working-directory: extra/contextual-escaping-extra
+              run: composer install
+
+            - name: "Run PHPStan"
+              working-directory: extra/contextual-escaping-extra
+              run: vendor/bin/phpstan analyse --no-progress
+
     phpstan:
         name: "PHPStan"
 
@@ -190,7 +224,7 @@ jobs:
 
         steps:
             - name: "Checkout code"
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
 
             - name: "Install PHP with extensions"
               uses: shivammathur/setup-php@v2

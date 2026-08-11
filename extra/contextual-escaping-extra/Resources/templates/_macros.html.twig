@@ -1,0 +1,36 @@
+{% macro icon(name, class) -%}
+<svg class="tree-icon {{ class }}" aria-hidden="true"><use href="#tree-icon-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro navigation_node(node) -%}
+{% for name, directory in node.directories -%}
+<details class="nav-directory"><summary><span class="nav-name">{{ _self.icon('chevron', 'tree-chevron') }}{{ _self.icon('folder', 'tree-folder-closed') }}{{ _self.icon('folder-open', 'tree-folder-open') }}<span>{{ name }}</span></span><span class="nav-count">{{ directory.count }}</span></summary><div>{{ _self.navigation_node(directory) }}</div></details>
+{%- endfor %}
+{% for name, file in node.files -%}
+<a href="#{{ file.id }}" data-template-link="{{ file.template }}"><span class="nav-name">{{ _self.icon('file', 'tree-file') }}<span>{{ name }}</span></span><span class="nav-count">{{ file.count }}</span></a>
+{%- endfor %}
+{%- endmacro %}
+
+{% macro current_pipeline(escapes, current) -%}
+<div class="pipeline"><strong>Current Twig</strong>{% if escapes %}<div class="current-escapes">{% for escape in escapes %}<span class="current-escape"><strong>{% if escape.scope == 'whole' %}Whole output{% else %}Nested <code>{{ escape.expression }}</code>{% endif %}:</strong><code>{{ escape.strategy }}</code><small>{{ escape.automatic ? 'automatic' : 'explicit' }}</small></span>{% endfor %}</div>{% else %}<span class="pipeline-empty">{{ current == 'none' ? 'No recognized current escaping' : current }}</span>{% endif %}</div>
+{%- endmacro %}
+
+{% macro required_pipeline(operations) -%}
+<div class="pipeline"><strong>Required pipeline</strong>{% if operations %}<div class="pipeline-steps">{% for operation in operations %}{% if not loop.first %}<span class="pipeline-arrow" aria-hidden="true">→</span>{% endif %}<span class="badge operation">{{ operation }}</span>{% endfor %}</div>{% else %}<span class="pipeline-empty">No escaping required</span>{% endif %}</div>
+{%- endmacro %}
+
+{% macro provenance(steps, label) -%}
+{% if steps %}<div class="provenance"><strong>{{ label }}</strong><ol>{% for step in steps %}<li><code>{{ step }}</code></li>{% endfor %}</ol></div>{% endif %}
+{%- endmacro %}
+
+{% macro source(excerpt) -%}
+{% if excerpt %}{% if excerpt.lines %}<pre class="source">{% for line in excerpt.lines %}<span class="source-line"><a class="source-number" href="{{ excerpt.uri }}#L{{ line.number }}">{{ line.number }}</a><span class="source-code">{{ line.before }}{% if line.highlight is not null %}<mark class="expression-highlight">{{ line.highlight }}</mark>{% endif %}{{ line.after }}</span></span>{% endfor %}</pre>{% else %}<code class="expression">{{ excerpt.expression }}</code>{% endif %}{% endif %}
+{%- endmacro %}
+
+{% macro plan(plan) -%}
+<article class="finding {{ plan.assessment.status }}" data-views="{{ plan.assessment.views|join(' ') }}" data-ownership="{{ plan.ownership }}" data-assessments="{{ plan.assessment.assessments|join(' ') }}" data-operations="{{ plan.operations|join(' ') }}" data-search="{{ plan.search }}"><div class="finding-head"><span class="badge status">{{ plan.assessment.label }}</span><span class="badge ownership">{{ plan.ownership == 'application' ? 'Application' : 'Dependency' }}</span>{% if 'url-trust' in plan.assessment.assessments %}<span class="badge capability">URL validation or trusted metadata needed</span>{% endif %}{% if plan.assessment.unavailable %}<span class="badge capability">Pipeline unavailable in current Twig</span>{% endif %}<span class="line">Line {{ plan.line }}</span></div><div class="pipeline-comparison">{{ _self.current_pipeline(plan.current_escapes, plan.current_label) }}{{ _self.required_pipeline(plan.operations) }}</div><p class="context-reason"><strong>{{ plan.assessment.status == 'proven' ? 'Why no escaping is required' : 'Why this is required' }}</strong><span>{{ plan.context_reason }}</span></p>{{ _self.provenance(plan.provenance, 'Value provenance') }}{{ _self.provenance(plan.value_contract, 'Value contract') }}<p class="guidance"><strong>{{ plan.assessment.title }}</strong><span>{{ plan.assessment.guidance }}</span></p>{{ _self.source(plan.source) }}</article>
+{%- endmacro %}
+
+{% macro diagnostic(diagnostic) -%}
+<article class="finding diagnostic" data-views="action" data-ownership="{{ diagnostic.ownership }}" data-assessments="diagnostic {{ diagnostic.assessment.assessment }}" data-operations="" data-search="{{ diagnostic.search }}"><div class="finding-head"><span class="badge status">{{ diagnostic.code }}</span><span class="badge ownership">{{ diagnostic.ownership == 'application' ? 'Application' : 'Dependency' }}</span><span class="badge capability">{{ diagnostic.assessment.label }}</span><span class="line">Line {{ diagnostic.line }}</span></div><p class="message">{{ diagnostic.message }}</p><p class="guidance"><strong>{{ diagnostic.assessment.title }}</strong><span>{{ diagnostic.assessment.guidance }}</span></p>{{ _self.source(diagnostic.source) }}</article>
+{%- endmacro %}

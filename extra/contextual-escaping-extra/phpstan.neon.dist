@@ -1,0 +1,8 @@
+parameters:
+    level: 3
+    paths:
+        - .
+    excludePaths:
+        - Audit/ApplicationKernel.php
+        - Tests
+        - vendor

@@ -1,7 +1,6 @@
 {
     "name": "twig/twig",
     "type": "library",
-    "bin": ["bin/lint_contextual_escaping.php"],
     "description": "Twig, the flexible, fast, and secure template language for PHP",
     "keywords": ["templating"],
     "homepage": "https://twig.symfony.com",

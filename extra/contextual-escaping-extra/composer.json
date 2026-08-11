@@ -1,0 +1,42 @@
+{
+    "name": "twig/contextual-escaping-extra",
+    "type": "library",
+    "bin": ["bin/lint-contextual-escaping"],
+    "description": "Contextual escaping analysis and linting for Twig",
+    "keywords": ["twig", "escaping", "security", "lint"],
+    "homepage": "https://twig.symfony.com",
+    "license": "MIT",
+    "minimum-stability": "dev",
+    "authors": [
+        {
+            "name": "Fabien Potencier",
+            "email": "fabien@symfony.com",
+            "homepage": "http://fabien.potencier.org",
+            "role": "Lead Developer"
+        }
+    ],
+    "require": {
+        "php": ">=8.1.0",
+        "twig/twig": "^3.29|^4.0"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.0@stable",
+        "symfony/phpunit-bridge": "^6.4|^7.0"
+    },
+    "suggest": {
+        "symfony/framework-bundle": "Required to audit a Symfony full-stack application with the bundled linter"
+    },
+    "autoload": {
+        "psr-4": {
+            "Twig\\Extra\\ContextualEscaping\\": ""
+        },
+        "exclude-from-classmap": [
+            "/Tests/"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Twig\\Extra\\ContextualEscaping\\Tests\\": "Tests/"
+        }
+    }
+}
