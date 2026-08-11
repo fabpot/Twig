@@ -94,9 +94,8 @@ final class EscapePlanInferer
             return new EscapePlanInference(DiagnosticCode::AmbiguousMetaRefreshContext, 'The "http-equiv" attribute is dynamic, so the meta content context cannot be determined safely.');
         }
 
-        $attributeContentType = $unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute;
         $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
-        $outerPlan = $contentTypes->contains($attributeContentType) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted)) ? [] : [$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute];
+        $outerPlan = $this->withOuterAttributePlan([], $contentTypes, $unquoted);
         $requiredContentType = match ($context->getAttributeType()) {
             HtmlAttributeType::Html => ContentType::Html,
             HtmlAttributeType::UrlList, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
@@ -131,26 +130,9 @@ final class EscapePlanInferer
             return new EscapePlanInference(DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic URL without a static query or fragment delimiter is ambiguous.');
         }
 
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        $outerPlan = $outerSafe ? [] : [$outerOperation];
-        if ($contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::UrlComponent)) {
-            return new EscapePlanInference(new EscapePlan($outerPlan));
-        }
-        if (UrlPart::Start === $context->getUrlPart() && $contentTypes->contains(ContentType::Url)) {
-            return new EscapePlanInference(new EscapePlan($outerPlan));
-        }
+        $operations = $this->getUrlPartOperations($context->getUrlPart(), $contentTypes, false);
 
-        $operations = match ($context->getUrlPart()) {
-            UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-            UrlPart::Path => [EscapeOperation::UrlPath],
-            UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-        };
-        if (!$outerPlan) {
-            $outerPlan = [$outerOperation];
-        }
-
-        return new EscapePlanInference(new EscapePlan([...$operations, ...$outerPlan]));
+        return new EscapePlanInference(new EscapePlan($this->withOuterAttributePlan($operations, $contentTypes, $unquoted)));
     }
 
     private function inferSrcsetPlan(HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): EscapePlanInference
@@ -160,40 +142,34 @@ final class EscapePlanInferer
             return $this->rejectOutputContext($context);
         }
 
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        $outerPlan = $outerSafe ? [] : [$outerOperation];
         if ($contentTypes->contains(ContentType::TrustedInnermost)) {
-            return new EscapePlanInference(new EscapePlan($outerPlan));
+            return new EscapePlanInference(new EscapePlan($this->withOuterAttributePlan([], $contentTypes, $unquoted)));
         }
 
         if (SrcsetState::BeforeUrl === $srcsetContext->getState()) {
             if ($contentTypes->contains(ContentType::Srcset) || $contentTypes->contains(ContentType::UrlComponent)) {
-                return new EscapePlanInference(new EscapePlan($outerPlan));
-            }
-            if ($contentTypes->contains(ContentType::Url)) {
-                return new EscapePlanInference(new EscapePlan([EscapeOperation::UrlNormalize, $outerOperation]));
+                $operations = [];
+            } elseif ($contentTypes->contains(ContentType::Url)) {
+                $operations = [EscapeOperation::UrlNormalize];
+            } else {
+                $operations = [EscapeOperation::SrcsetFilter];
             }
 
-            return new EscapePlanInference(new EscapePlan([EscapeOperation::SrcsetFilter, $outerOperation]));
+            return new EscapePlanInference(new EscapePlan($this->withOuterAttributePlan($operations, $contentTypes, $unquoted)));
         }
 
         if (SrcsetState::Url === $srcsetContext->getState()) {
             if ($contentTypes->contains(ContentType::Srcset) || \in_array($srcsetContext->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
                 return new EscapePlanInference(DiagnosticCode::AmbiguousSrcsetContext, 'Output in an ambiguous srcset URL context is not supported.');
             }
-            if ($contentTypes->contains(ContentType::UrlComponent)) {
-                return new EscapePlanInference(new EscapePlan($outerPlan));
-            }
 
-            $operations = match ($srcsetContext->getUrlPart()) {
+            $operations = $contentTypes->contains(ContentType::UrlComponent) ? [] : match ($srcsetContext->getUrlPart()) {
                 UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
                 UrlPart::Path => [EscapeOperation::UrlPath],
                 UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
             };
-            $operations[] = $outerOperation;
 
-            return new EscapePlanInference(new EscapePlan($operations));
+            return new EscapePlanInference(new EscapePlan($this->withOuterAttributePlan($operations, $contentTypes, $unquoted)));
         }
 
         $message = match ($srcsetContext->getState()) {
@@ -225,28 +201,12 @@ final class EscapePlanInferer
             if (\in_array($urlPart, [UrlPart::None, UrlPart::Unknown], true)) {
                 return new EscapePlanInference(DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic meta refresh URL without a static query or fragment delimiter is ambiguous.');
             }
-            if ($trusted || $contentTypes->contains(ContentType::UrlComponent)) {
-                $operations = [];
-            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
-                $operations = [EscapeOperation::UrlNormalize];
-            } else {
-                $operations = match ($urlPart) {
-                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-                    UrlPart::Path => [EscapeOperation::UrlPath],
-                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-                };
-            }
+            $operations = $this->getUrlPartOperations($urlPart, $contentTypes, true);
         } else {
             throw new \LogicException(\sprintf('Unexpected meta refresh state "%s".', $metaRefreshContext->getState()->name));
         }
 
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        if ($operations || !$outerSafe) {
-            $operations[] = $outerOperation;
-        }
-
-        return new EscapePlanInference(new EscapePlan($operations));
+        return new EscapePlanInference(new EscapePlan($this->withOuterAttributePlan($operations, $contentTypes, $unquoted)));
     }
 
     private function inferCssPlan(HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): EscapePlanInference
@@ -283,11 +243,7 @@ final class EscapePlanInferer
 
         $operations = null === $operation ? [] : [$operation];
         if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if (null !== $operation || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
+            $operations = $this->withOuterAttributePlan($operations, $contentTypes, $unquoted);
         }
 
         return new EscapePlanInference(new EscapePlan($operations));
@@ -303,26 +259,11 @@ final class EscapePlanInferer
         if ($contentTypes->contains(ContentType::TrustedInnermost)) {
             $operations = [];
         } else {
-            if ($contentTypes->contains(ContentType::UrlComponent)) {
-                $operations = [];
-            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
-                $operations = [EscapeOperation::UrlNormalize];
-            } else {
-                $operations = match ($urlPart) {
-                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-                    UrlPart::Path => [EscapeOperation::UrlPath],
-                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-                };
-            }
-            $operations[] = EscapeOperation::CssString;
+            $operations = [...$this->getUrlPartOperations($urlPart, $contentTypes, true), EscapeOperation::CssString];
         }
 
         if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if ($operations || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
+            $operations = $this->withOuterAttributePlan($operations, $contentTypes, $unquoted);
         }
 
         return new EscapePlanInference(new EscapePlan($operations));
@@ -350,14 +291,46 @@ final class EscapePlanInferer
         };
         $operations = null === $operation ? [] : [$operation];
         if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if (null !== $operation || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
+            $operations = $this->withOuterAttributePlan($operations, $contentTypes, $unquoted);
         }
 
         return new EscapePlanInference(new EscapePlan($operations));
+    }
+
+    /**
+     * @param list<EscapeOperation> $operations Inner operations that must run before the outer attribute escaping
+     *
+     * @return list<EscapeOperation>
+     */
+    private function withOuterAttributePlan(array $operations, ContentTypeSet $contentTypes, bool $unquoted): array
+    {
+        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
+        if ($operations || !$outerSafe) {
+            $operations[] = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
+        }
+
+        return $operations;
+    }
+
+    /**
+     * @param bool $normalizeCompleteUrl Whether a trusted complete URL still needs normalization in this context
+     *
+     * @return list<EscapeOperation>
+     */
+    private function getUrlPartOperations(UrlPart $urlPart, ContentTypeSet $contentTypes, bool $normalizeCompleteUrl): array
+    {
+        if ($contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::UrlComponent)) {
+            return [];
+        }
+        if (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
+            return $normalizeCompleteUrl ? [EscapeOperation::UrlNormalize] : [];
+        }
+
+        return match ($urlPart) {
+            UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
+            UrlPart::Path => [EscapeOperation::UrlPath],
+            UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
+        };
     }
 
     private function rejectOutputContext(HtmlContext $context): EscapePlanInference
