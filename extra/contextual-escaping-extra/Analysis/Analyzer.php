@@ -692,19 +692,7 @@ final class Analyzer
             return $node->getAttribute('ignore_missing') ? $context : $context->toDead();
         }
 
-        $contentTypes = $this->contentTypes;
-        $staticValues = $this->staticValues;
-        if ($node->hasNode('variables')) {
-            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
-        } elseif ($node->getAttribute('only')) {
-            $this->contentTypes = [];
-            $this->staticValues = [];
-        }
-        $context = $this->analyzeModule($module, $context, $node);
-        $this->contentTypes = $contentTypes;
-        $this->staticValues = $staticValues;
-
-        return $context;
+        return $this->analyzeModuleWithVariables($module, $context, $node, $node->hasNode('variables') ? $node->getNode('variables') : null, $node->getAttribute('only'));
     }
 
     private function analyzeEmbed(EmbedNode $node, HtmlContext $context): HtmlContext
@@ -714,15 +702,20 @@ final class Analyzer
             return $this->rejectCompositionNode($node, $context);
         }
 
+        return $this->analyzeModuleWithVariables($this->embeddedModules[$index], $context, $node, $node->hasNode('variables') ? $node->getNode('variables') : null, $node->getAttribute('only'));
+    }
+
+    private function analyzeModuleWithVariables(ModuleNode $module, HtmlContext $context, Node $origin, ?Node $variables, bool $only): HtmlContext
+    {
         $contentTypes = $this->contentTypes;
         $staticValues = $this->staticValues;
-        if ($node->hasNode('variables')) {
-            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
-        } elseif ($node->getAttribute('only')) {
+        if (null !== $variables) {
+            $this->applyVariableContentTypes($variables, $only);
+        } elseif ($only) {
             $this->contentTypes = [];
             $this->staticValues = [];
         }
-        $context = $this->analyzeModule($this->embeddedModules[$index], $context, $node);
+        $context = $this->analyzeModule($module, $context, $origin);
         $this->contentTypes = $contentTypes;
         $this->staticValues = $staticValues;
 
@@ -1053,23 +1046,11 @@ final class Analyzer
                 return $ignoreMissing ? $context : $context->toDead();
             }
 
-            $contentTypes = $this->contentTypes;
-            $staticValues = $this->staticValues;
             $withContextNode = $arguments->hasNode(2) ? $arguments->getNode(2) : ($arguments->hasNode('with_context') ? $arguments->getNode('with_context') : null);
             $withContext = !($withContextNode instanceof ConstantExpression) || false !== $withContextNode->getAttribute('value');
-            if ($arguments->hasNode(1)) {
-                $this->applyVariableContentTypes($arguments->getNode(1), !$withContext);
-            } elseif ($arguments->hasNode('variables')) {
-                $this->applyVariableContentTypes($arguments->getNode('variables'), !$withContext);
-            } elseif (!$withContext) {
-                $this->contentTypes = [];
-                $this->staticValues = [];
-            }
-            $context = $this->analyzeModule($module, $context, $origin);
-            $this->contentTypes = $contentTypes;
-            $this->staticValues = $staticValues;
+            $variables = $arguments->hasNode(1) ? $arguments->getNode(1) : ($arguments->hasNode('variables') ? $arguments->getNode('variables') : null);
 
-            return $context;
+            return $this->analyzeModuleWithVariables($module, $context, $origin, $variables, !$withContext);
         }
 
         return $context;
