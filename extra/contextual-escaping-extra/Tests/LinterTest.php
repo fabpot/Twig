@@ -1961,6 +1961,19 @@ class LinterTest extends TestCase
         $this->assertStringContainsString('Recursive composition', $result->getDiagnostics()[0]->getMessage());
     }
 
+    public function testRejectsReassignedMacroImports(): void
+    {
+        $result = $this->lintTemplates([
+            'first.html.twig' => '{% macro value() %}<a href="{{ value }}">x</a>{% endmacro %}',
+            'second.html.twig' => '{% macro value() %}{{ value }}{% endmacro %}',
+            'index.html.twig' => '{% if condition %}{% import "first.html.twig" as macros %}{% else %}{% import "second.html.twig" as macros %}{% endif %}{{ macros.value() }}',
+        ], 'index.html.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedTemplateComposition], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('Reassigning a macro import', $result->getDiagnostics()[0]->getMessage());
+        $this->assertSame([], $result->getInferredEscapes());
+    }
+
     /**
      * @dataProvider provideUnsupportedComposition
      */

@@ -342,9 +342,13 @@ final class Analyzer
         $imports = [];
         $visitedImports = [];
         foreach ([...$modules, ...$traitModules] as $scopeModule) {
-            $this->collectImports($scopeModule, $scopeModule->getNode('body'), $imports, $visitedImports);
+            if (!$this->collectImports($scopeModule, $scopeModule->getNode('body'), $imports, $visitedImports)) {
+                return null;
+            }
             foreach (['blocks', 'macros'] as $name) {
-                $this->collectImports($scopeModule, $scopeModule->getNode($name), $imports, $visitedImports);
+                if (!$this->collectImports($scopeModule, $scopeModule->getNode($name), $imports, $visitedImports)) {
+                    return null;
+                }
             }
         }
 
@@ -510,28 +514,39 @@ final class Analyzer
      * @param array<string, ModuleNode> $imports
      * @param array<int, true>          $visited
      */
-    private function collectImports(ModuleNode $module, Node $node, array &$imports, array &$visited): void
+    private function collectImports(ModuleNode $module, Node $node, array &$imports, array &$visited): bool
     {
         if ($node instanceof ImportNode) {
             $variable = $node->getNode('var')->getNode('var');
             $expression = $node->getNode('expr');
             $importedModule = $expression instanceof ContextVariable && '_self' === $expression->getAttribute('name') ? $module : $this->resolveTemplateExpression($expression, $node);
             if ($this->isMacroVariable($variable) && null !== $importedModule) {
-                $imports[$this->getMacroVariableKey($variable, $module)] = $importedModule;
+                $key = $this->getMacroVariableKey($variable, $module);
+                if (isset($imports[$key]) && $imports[$key]->getTemplateName() !== $importedModule->getTemplateName()) {
+                    $this->addDiagnostic($node, DiagnosticCode::UnsupportedTemplateComposition, 'Reassigning a macro import to another template is not supported by experimental contextual escaping analysis.');
+
+                    return false;
+                }
+                $imports[$key] = $importedModule;
                 $id = spl_object_id($importedModule);
                 if (!isset($visited[$id])) {
                     $visited[$id] = true;
-                    $this->collectImports($importedModule, $importedModule->getNode('body'), $imports, $visited);
-                    $this->collectImports($importedModule, $importedModule->getNode('macros'), $imports, $visited);
+                    if (!$this->collectImports($importedModule, $importedModule->getNode('body'), $imports, $visited) || !$this->collectImports($importedModule, $importedModule->getNode('macros'), $imports, $visited)) {
+                        return false;
+                    }
                 }
             }
 
-            return;
+            return true;
         }
 
         foreach ($node as $child) {
-            $this->collectImports($module, $child, $imports, $visited);
+            if (!$this->collectImports($module, $child, $imports, $visited)) {
+                return false;
+            }
         }
+
+        return true;
     }
 
     private function getMacroVariableKey(Node $variable, ModuleNode $module): string
