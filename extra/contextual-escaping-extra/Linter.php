@@ -22,6 +22,7 @@ use Twig\Extra\ContextualEscaping\Analysis\CurrentEscapingSafetyAnalyzer;
 use Twig\Extra\ContextualEscaping\Analysis\Diagnostic;
 use Twig\Extra\ContextualEscaping\Analysis\DiagnosticCode;
 use Twig\Extra\ContextualEscaping\Analysis\EnvironmentTemplateResolver;
+use Twig\Extra\ContextualEscaping\Analysis\EscapePlanInferer;
 use Twig\Extra\ContextualEscaping\Analysis\HtmlAttributeMapLoopShapeAnalyzer;
 use Twig\Extra\ContextualEscaping\Analysis\NodeAnalyzerRegistry;
 use Twig\Extra\ContextualEscaping\Analysis\StaticExpressionAnalyzer;
@@ -67,6 +68,7 @@ final class Linter
                     new MetaRefreshContextParser(),
                     new SrcsetContextParser(),
                 ),
+                new EscapePlanInferer(),
                 new EnvironmentTemplateResolver($environment),
                 $currentSafetyAnalyzer,
                 $nodeAnalyzerRegistry,

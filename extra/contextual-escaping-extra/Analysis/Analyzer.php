@@ -12,15 +12,9 @@
 namespace Twig\Extra\ContextualEscaping\Analysis;
 
 use Twig\Extra\ContextualEscaping\Context\CssState;
-use Twig\Extra\ContextualEscaping\Context\HtmlAttributeType;
 use Twig\Extra\ContextualEscaping\Context\HtmlContext;
 use Twig\Extra\ContextualEscaping\Context\HtmlContextParser;
 use Twig\Extra\ContextualEscaping\Context\HtmlState;
-use Twig\Extra\ContextualEscaping\Context\JavaScriptState;
-use Twig\Extra\ContextualEscaping\Context\JavaScriptTokenType;
-use Twig\Extra\ContextualEscaping\Context\MetaRefreshState;
-use Twig\Extra\ContextualEscaping\Context\SrcsetState;
-use Twig\Extra\ContextualEscaping\Context\UrlPart;
 use Twig\Node\AutoEscapeNode;
 use Twig\Node\BlockNode;
 use Twig\Node\BlockReferenceNode;
@@ -119,6 +113,7 @@ final class Analyzer
 
     public function __construct(
         private HtmlContextParser $contextParser,
+        private EscapePlanInferer $escapePlanInferer,
         private ?TemplateResolverInterface $templateResolver = null,
         private ?CurrentEscapingSafetyAnalyzer $currentSafetyAnalyzer = null,
         private ?NodeAnalyzerRegistry $nodeAnalyzerRegistry = null,
@@ -941,17 +936,20 @@ final class Analyzer
         }
 
         $context = $context->recordAttributeInterpolation($contentTypes->contains(ContentType::TrustedInnermost));
-        $plan = $this->inferPlan($node, $context, $contentTypes);
-        if (null === $plan) {
+        $inference = $this->escapePlanInferer->infer($context, $contentTypes);
+        if (!$inference->isSuccessful()) {
+            $this->addDiagnostic($node, $inference->getDiagnosticCode(), $inference->getDiagnosticMessage());
+
             return $this->contextAfterUnsupportedPrint($context);
         }
+        $plan = $inference->getPlan();
 
         $this->addInferredEscape(new InferredEscape($node, $plan, $context->describe(), valueContracts: $this->collectValueContracts($expression)));
         $operations = $plan->getOperations();
         $context = $context
             ->afterUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
             ->afterCssUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
-            ->afterCssInterpolation($this->cssInterpolationCanChangeContext($contentTypes, $operations))
+            ->afterCssInterpolation($this->escapePlanInferer->cssInterpolationCanChangeContext($contentTypes, $operations))
             ->afterMetaRefreshUrlInterpolation($contentTypes->contains(ContentType::UrlComponent))
             ->afterMetaRefreshInterpolation(
                 \in_array(EscapeOperation::MetaRefreshDelay, $operations, true),
@@ -1279,362 +1277,6 @@ final class Analyzer
         }
 
         return new ContentTypeSet($types ?: [ContentType::PlainText]);
-    }
-
-    private function inferPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes): ?EscapePlan
-    {
-        if ($contentTypes->contains(ContentType::HtmlAttributeList)) {
-            if (HtmlState::BeforeAttributeName === $context->getState()) {
-                return new EscapePlan([]);
-            }
-
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('An HTML attribute list cannot be rendered in %s.', $context->describe()));
-
-            return null;
-        }
-        if ($context->getState()->isScriptData()) {
-            return $this->inferJavaScriptPlan($node, $context, $contentTypes, false);
-        }
-        if (HtmlState::RawText === $context->getState() && null !== $context->getCssContext()) {
-            return $this->inferCssPlan($node, $context, $contentTypes, false);
-        }
-
-        return match ($context->getState()) {
-            HtmlState::Text => new EscapePlan($contentTypes->contains(ContentType::Html) || $contentTypes->contains(ContentType::TrustedInnermost) ? [] : [EscapeOperation::HtmlText]),
-            HtmlState::Rcdata => new EscapePlan($contentTypes->contains(ContentType::HtmlRcdata) || $contentTypes->contains(ContentType::TrustedInnermost) ? [] : [EscapeOperation::HtmlRcdata]),
-            HtmlState::AttributeValueDoubleQuoted, HtmlState::AttributeValueSingleQuoted => $this->inferAttributePlan($node, $context, $contentTypes, false),
-            HtmlState::AttributeValueUnquoted => $this->inferAttributePlan($node, $context, $contentTypes, true),
-            HtmlState::Comment, HtmlState::CommentStart, HtmlState::CommentStartDash, HtmlState::CommentEndDash, HtmlState::CommentEnd, HtmlState::CommentEndBang => $this->rejectCommentInterpolation($node),
-            HtmlState::RawText, HtmlState::Plaintext => $this->rejectOutputContext($node, $context),
-            default => $this->rejectStructuralInterpolation($node, $context),
-        };
-    }
-
-    private function inferAttributePlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
-    {
-        if (HtmlAttributeType::JavaScript === $context->getAttributeType()) {
-            return $this->inferJavaScriptPlan($node, $context, $contentTypes, true, $unquoted);
-        }
-        if (HtmlAttributeType::Style === $context->getAttributeType()) {
-            return $this->inferCssPlan($node, $context, $contentTypes, true, $unquoted);
-        }
-        if (HtmlAttributeType::Url === $context->getAttributeType()) {
-            return $this->inferUrlPlan($node, $context, $contentTypes, $unquoted);
-        }
-        if (HtmlAttributeType::MetaRefresh === $context->getAttributeType()) {
-            return $this->inferMetaRefreshPlan($node, $context, $contentTypes, $unquoted);
-        }
-        if (HtmlAttributeType::Srcset === $context->getAttributeType()) {
-            return $this->inferSrcsetPlan($node, $context, $contentTypes, $unquoted);
-        }
-        if (HtmlAttributeType::MetaContentUnknown === $context->getAttributeType()) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'The "http-equiv" attribute is dynamic, so the meta content context cannot be determined safely.');
-
-            return null;
-        }
-
-        $attributeContentType = $unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute;
-        $trustedInnermost = $contentTypes->contains(ContentType::TrustedInnermost);
-        $outerPlan = $contentTypes->contains($attributeContentType) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted)) ? [] : [$unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute];
-        $requiredContentType = match ($context->getAttributeType()) {
-            HtmlAttributeType::Html => ContentType::Html,
-            HtmlAttributeType::UrlList, HtmlAttributeType::MetaContent, HtmlAttributeType::None, HtmlAttributeType::Plain => null,
-        };
-        if ($trustedInnermost && \in_array($context->getAttributeType(), [HtmlAttributeType::Plain, HtmlAttributeType::MetaContent], true)) {
-            return new EscapePlan([]);
-        }
-        if (($trustedInnermost && HtmlAttributeType::Html === $context->getAttributeType()) || (null !== $requiredContentType && $contentTypes->contains($requiredContentType))) {
-            return new EscapePlan($outerPlan);
-        }
-
-        $analysis = match ($context->getAttributeType()) {
-            HtmlAttributeType::UrlList => 'URL list',
-            HtmlAttributeType::Html => 'embedded HTML',
-            HtmlAttributeType::MetaContent => null,
-            HtmlAttributeType::None => 'unknown contextual',
-            HtmlAttributeType::Plain => null,
-        };
-        if (null !== $analysis) {
-            $this->addDiagnostic($node, DiagnosticCode::UnsupportedAttributeContext, \sprintf('Output in the "%s" attribute requires %s analysis, which is not implemented yet.', $context->getAttributeName(), $analysis));
-
-            return null;
-        }
-
-        return new EscapePlan($outerPlan);
-    }
-
-    private function inferUrlPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
-    {
-        if (\in_array($context->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic URL without a static query or fragment delimiter is ambiguous.');
-
-            return null;
-        }
-
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        $outerPlan = $outerSafe ? [] : [$outerOperation];
-        if ($contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::UrlComponent)) {
-            return new EscapePlan($outerPlan);
-        }
-        if (UrlPart::Start === $context->getUrlPart() && $contentTypes->contains(ContentType::Url)) {
-            return new EscapePlan($outerPlan);
-        }
-
-        $operations = match ($context->getUrlPart()) {
-            UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-            UrlPart::Path => [EscapeOperation::UrlPath],
-            UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-        };
-        if (!$outerPlan) {
-            $outerPlan = [$outerOperation];
-        }
-
-        return new EscapePlan([...$operations, ...$outerPlan]);
-    }
-
-    private function inferSrcsetPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
-    {
-        $srcsetContext = $context->getSrcsetContext();
-        if (null === $srcsetContext) {
-            return $this->rejectOutputContext($node, $context);
-        }
-
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        $outerPlan = $outerSafe ? [] : [$outerOperation];
-        if ($contentTypes->contains(ContentType::TrustedInnermost)) {
-            return new EscapePlan($outerPlan);
-        }
-
-        if (SrcsetState::BeforeUrl === $srcsetContext->getState()) {
-            if ($contentTypes->contains(ContentType::Srcset) || $contentTypes->contains(ContentType::UrlComponent)) {
-                return new EscapePlan($outerPlan);
-            }
-            if ($contentTypes->contains(ContentType::Url)) {
-                return new EscapePlan([EscapeOperation::UrlNormalize, $outerOperation]);
-            }
-
-            return new EscapePlan([EscapeOperation::SrcsetFilter, $outerOperation]);
-        }
-
-        if (SrcsetState::Url === $srcsetContext->getState()) {
-            if ($contentTypes->contains(ContentType::Srcset) || \in_array($srcsetContext->getUrlPart(), [UrlPart::None, UrlPart::Unknown], true)) {
-                $this->addDiagnostic($node, DiagnosticCode::AmbiguousSrcsetContext, 'Output in an ambiguous srcset URL context is not supported.');
-
-                return null;
-            }
-            if ($contentTypes->contains(ContentType::UrlComponent)) {
-                return new EscapePlan($outerPlan);
-            }
-
-            $operations = match ($srcsetContext->getUrlPart()) {
-                UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-                UrlPart::Path => [EscapeOperation::UrlPath],
-                UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-            };
-            $operations[] = $outerOperation;
-
-            return new EscapePlan($operations);
-        }
-
-        $message = match ($srcsetContext->getState()) {
-            SrcsetState::UrlComma => 'Output immediately after a comma in a srcset URL is ambiguous because the comma may be part of the URL or terminate the candidate.',
-            SrcsetState::BeforeDescriptor, SrcsetState::Descriptor, SrcsetState::DescriptorParenthesized, SrcsetState::AfterDescriptor => 'Output expressions in srcset descriptors are not supported.',
-            SrcsetState::Unknown => 'Output after dynamic or character-reference srcset content is ambiguous.',
-        };
-        $this->addDiagnostic($node, DiagnosticCode::AmbiguousSrcsetContext, $message);
-
-        return null;
-    }
-
-    private function inferMetaRefreshPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $unquoted): ?EscapePlan
-    {
-        $metaRefreshContext = $context->getMetaRefreshContext();
-        if (null === $metaRefreshContext) {
-            return $this->rejectOutputContext($node, $context);
-        }
-        if (\in_array($metaRefreshContext->getState(), [MetaRefreshState::DelayWhitespace, MetaRefreshState::BeforeUrl, MetaRefreshState::UrlPrefix, MetaRefreshState::UrlPrefixWhitespace, MetaRefreshState::Unknown], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousMetaRefreshContext, 'Output in an ambiguous meta refresh delimiter, URL prefix, or character-reference context is not supported.');
-
-            return null;
-        }
-
-        $trusted = $contentTypes->contains(ContentType::TrustedInnermost);
-        if (MetaRefreshState::Delay === $metaRefreshContext->getState()) {
-            $operations = $trusted ? [] : [EscapeOperation::MetaRefreshDelay];
-        } elseif (MetaRefreshState::Done === $metaRefreshContext->getState()) {
-            $operations = [];
-        } elseif (\in_array($metaRefreshContext->getState(), [MetaRefreshState::UrlStart, MetaRefreshState::Url, MetaRefreshState::UrlDoubleQuoted, MetaRefreshState::UrlSingleQuoted], true)) {
-            $urlPart = $metaRefreshContext->getUrlPart();
-            if (\in_array($urlPart, [UrlPart::None, UrlPart::Unknown], true)) {
-                $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic meta refresh URL without a static query or fragment delimiter is ambiguous.');
-
-                return null;
-            }
-            if ($trusted || $contentTypes->contains(ContentType::UrlComponent)) {
-                $operations = [];
-            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
-                $operations = [EscapeOperation::UrlNormalize];
-            } else {
-                $operations = match ($urlPart) {
-                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-                    UrlPart::Path => [EscapeOperation::UrlPath],
-                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-                };
-            }
-        } else {
-            throw new \LogicException(\sprintf('Unexpected meta refresh state "%s".', $metaRefreshContext->getState()->name));
-        }
-
-        $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-        $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-        if ($operations || !$outerSafe) {
-            $operations[] = $outerOperation;
-        }
-
-        return new EscapePlan($operations);
-    }
-
-    /**
-     * @param list<EscapeOperation> $operations
-     */
-    private function cssInterpolationCanChangeContext(ContentTypeSet $contentTypes, array $operations): bool
-    {
-        if (!$contentTypes->contains(ContentType::TrustedInnermost) && !$contentTypes->contains(ContentType::Css)) {
-            return false;
-        }
-
-        foreach ($operations as $operation) {
-            if (\in_array($operation, [EscapeOperation::CssValue, EscapeOperation::CssString, EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::UrlPath, EscapeOperation::UrlQuery], true)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private function inferCssPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): ?EscapePlan
-    {
-        $cssContext = $context->getCssContext();
-        if (null === $cssContext) {
-            return $this->rejectOutputContext($node, $context);
-        }
-        if (null !== $cssContext->getEscapeDigits() || '' !== $cssContext->getToken() || \in_array($cssContext->getState(), [CssState::Slash, CssState::UrlAfterValue, CssState::Unknown], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousCssContext, 'Output in an ambiguous CSS token, escape, or URL context is not supported.');
-
-            return null;
-        }
-        if (\in_array($cssContext->getState(), [CssState::Comment, CssState::CommentStar], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::CssCommentInterpolation, 'Output expressions inside CSS comments are not supported.');
-
-            return null;
-        }
-        if (\in_array($cssContext->getState(), [CssState::Selector, CssState::Import, CssState::PropertyName], true)) {
-            if (!$contentTypes->contains(ContentType::TrustedInnermost) && !$contentTypes->contains(ContentType::Css)) {
-                $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('Output expressions in CSS %s contexts are not supported.', match ($cssContext->getState()) {
-                    CssState::Selector => 'selector',
-                    CssState::Import => 'import',
-                    CssState::PropertyName => 'property-name',
-                }));
-
-                return null;
-            }
-
-            $operation = null;
-        } elseif (CssState::Value === $cssContext->getState()) {
-            $operation = $contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::Css) ? null : EscapeOperation::CssValue;
-        } elseif (\in_array($cssContext->getState(), [CssState::DoubleQuotedString, CssState::SingleQuotedString], true)) {
-            $operation = $contentTypes->contains(ContentType::TrustedInnermost) || $contentTypes->contains(ContentType::CssString) ? null : EscapeOperation::CssString;
-        } elseif (\in_array($cssContext->getState(), [CssState::UrlStart, CssState::UrlUnquoted, CssState::UrlDoubleQuoted, CssState::UrlSingleQuoted, CssState::ImportUrlDoubleQuoted, CssState::ImportUrlSingleQuoted], true)) {
-            return $this->inferCssUrlPlan($node, $context, $contentTypes, $attribute, $unquoted);
-        } else {
-            throw new \LogicException(\sprintf('Unexpected CSS state "%s".', $cssContext->getState()->name));
-        }
-
-        $operations = null === $operation ? [] : [$operation];
-        if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if (null !== $operation || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
-        }
-
-        return new EscapePlan($operations);
-    }
-
-    private function inferCssUrlPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted): ?EscapePlan
-    {
-        $urlPart = $context->getCssContext()?->getUrlPart() ?? UrlPart::None;
-        if (\in_array($urlPart, [UrlPart::None, UrlPart::Unknown], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousUrlContext, 'Output after a dynamic CSS URL without a static query or fragment delimiter is ambiguous.');
-
-            return null;
-        }
-
-        if ($contentTypes->contains(ContentType::TrustedInnermost)) {
-            $operations = [];
-        } else {
-            if ($contentTypes->contains(ContentType::UrlComponent)) {
-                $operations = [];
-            } elseif (UrlPart::Start === $urlPart && $contentTypes->contains(ContentType::Url)) {
-                $operations = [EscapeOperation::UrlNormalize];
-            } else {
-                $operations = match ($urlPart) {
-                    UrlPart::Start => [EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize],
-                    UrlPart::Path => [EscapeOperation::UrlPath],
-                    UrlPart::QueryOrFragment => [EscapeOperation::UrlQuery],
-                };
-            }
-            $operations[] = EscapeOperation::CssString;
-        }
-
-        if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if ($operations || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
-        }
-
-        return new EscapePlan($operations);
-    }
-
-    private function inferJavaScriptPlan(PrintNode $node, HtmlContext $context, ContentTypeSet $contentTypes, bool $attribute, bool $unquoted = false): ?EscapePlan
-    {
-        $javaScriptContext = $context->getJavaScriptContext();
-        if (null === $javaScriptContext) {
-            return $this->rejectOutputContext($node, $context);
-        }
-        if ($javaScriptContext->isEscaped() || $javaScriptContext->hasTemplateDollar() || (JavaScriptState::Code === $javaScriptContext->getState() && JavaScriptTokenType::None !== $javaScriptContext->getTokenType()) || \in_array($javaScriptContext->getState(), [JavaScriptState::Slash, JavaScriptState::LessThan, JavaScriptState::HtmlOpenCommentBang, JavaScriptState::HtmlOpenCommentDash, JavaScriptState::Minus, JavaScriptState::HtmlCloseCommentDashDash, JavaScriptState::Unknown], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::AmbiguousJavaScriptContext, 'Output in an ambiguous JavaScript token or slash context is not supported.');
-
-            return null;
-        }
-        if (\in_array($javaScriptContext->getState(), [JavaScriptState::LineComment, JavaScriptState::BlockComment, JavaScriptState::BlockCommentStar], true)) {
-            $this->addDiagnostic($node, DiagnosticCode::JavaScriptCommentInterpolation, 'Output expressions inside JavaScript comments are not supported.');
-
-            return null;
-        }
-
-        $trusted = $contentTypes->contains(ContentType::TrustedInnermost);
-        $operation = match ($javaScriptContext->getState()) {
-            JavaScriptState::Code => $trusted || $contentTypes->contains(ContentType::JavaScriptExpression) ? null : EscapeOperation::JavaScriptValue,
-            JavaScriptState::DoubleQuotedString, JavaScriptState::SingleQuotedString => $trusted || $contentTypes->contains(ContentType::JavaScriptString) ? null : EscapeOperation::JavaScriptString,
-            JavaScriptState::TemplateString => $trusted || $contentTypes->contains(ContentType::JavaScriptTemplateString) ? null : EscapeOperation::JavaScriptTemplateString,
-            JavaScriptState::RegExp => $trusted || $contentTypes->contains(ContentType::JavaScriptRegExp) ? null : EscapeOperation::JavaScriptRegExp,
-        };
-        $operations = null === $operation ? [] : [$operation];
-        if ($attribute) {
-            $outerOperation = $unquoted ? EscapeOperation::HtmlAttributeUnquoted : EscapeOperation::HtmlAttribute;
-            $outerSafe = $contentTypes->contains($unquoted ? ContentType::HtmlAttributeUnquoted : ContentType::HtmlAttribute) || (!$unquoted && $contentTypes->contains(ContentType::HtmlAttributeUnquoted));
-            if (null !== $operation || !$outerSafe) {
-                $operations[] = $outerOperation;
-            }
-        }
-
-        return new EscapePlan($operations);
     }
 
     private function analyzeIf(IfNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
@@ -2005,27 +1647,6 @@ final class Analyzer
         $this->addDiagnostic($node, DiagnosticCode::UnsupportedNode, \sprintf('The "%s" node has no contextual escaping analyzer.', $node::class));
 
         return $context->toDead();
-    }
-
-    private function rejectCommentInterpolation(PrintNode $node): null
-    {
-        $this->addDiagnostic($node, DiagnosticCode::CommentInterpolation, 'Output expressions inside HTML comments are not supported.');
-
-        return null;
-    }
-
-    private function rejectOutputContext(PrintNode $node, HtmlContext $context): null
-    {
-        $this->addDiagnostic($node, DiagnosticCode::UnsupportedOutputContext, \sprintf('Output in %s requires language-specific analysis, which is not implemented yet.', $context->describe()));
-
-        return null;
-    }
-
-    private function rejectStructuralInterpolation(PrintNode $node, HtmlContext $context): null
-    {
-        $this->addDiagnostic($node, DiagnosticCode::UnsupportedStructuralInterpolation, \sprintf('Output expressions in %s are not supported.', $context->describe()));
-
-        return null;
     }
 
     private function contextAfterUnsupportedPrint(HtmlContext $context): HtmlContext

@@ -16,6 +16,7 @@ use Twig\Environment;
 use Twig\Extra\ContextualEscaping\Analysis\Analyzer;
 use Twig\Extra\ContextualEscaping\Analysis\DiagnosticCode;
 use Twig\Extra\ContextualEscaping\Analysis\EscapeOperation;
+use Twig\Extra\ContextualEscaping\Analysis\EscapePlanInferer;
 use Twig\Extra\ContextualEscaping\Context\CssContextParser;
 use Twig\Extra\ContextualEscaping\Context\HtmlContextParser;
 use Twig\Extra\ContextualEscaping\Context\JavaScriptContextParser;
@@ -69,7 +70,7 @@ class ContentTypeLinterTest extends AbstractLinterTestCase
         $module = $environment->parse($environment->tokenize(new Source('{{ value }}', 'index.html.twig')));
         $module->getNode('body')->getNode(0)->getNode('expr')->setAttribute('is_generator', true);
 
-        $result = (new Analyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser(), new SrcsetContextParser())))->analyze($module);
+        $result = (new Analyzer(new HtmlContextParser(new JavaScriptContextParser(), new CssContextParser(), new MetaRefreshContextParser(), new SrcsetContextParser()), new EscapePlanInferer()))->analyze($module);
 
         $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
     }
