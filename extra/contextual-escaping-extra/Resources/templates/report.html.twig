@@ -21,7 +21,8 @@ button.metric:hover, button.metric:focus-visible { color: var(--accent); border-
 .metric strong { display: block; font-size: 20px; }
 .guide { max-width: 1500px; margin: 20px auto 0; padding: 0 32px; }
 .guide > div { padding: 14px 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
-.guide p { margin: 5px 0 0; color: var(--muted); }
+.guide p { margin: 8px 0 0; color: var(--muted); }
+.guide ol { display: grid; gap: 5px; margin: 8px 0 0; padding-left: 22px; }
 .guide strong { color: var(--text); }
 .view-tabs { display: flex; flex-wrap: wrap; gap: 7px; padding: 14px 32px 0; position: sticky; top: 0; z-index: 4; background: color-mix(in srgb, var(--panel) 94%, transparent); backdrop-filter: blur(10px); }
 .view-tab { padding: 7px 11px; color: var(--muted); font: inherit; font-weight: 650; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); cursor: pointer; }
@@ -58,24 +59,39 @@ input, select { width: 100%; padding: 9px 11px; border: 1px solid var(--border);
 h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .source-link { white-space: nowrap; }
 .finding { margin: 8px 0; padding: 13px 15px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; background: var(--panel); }
-.finding.proven, .finding.correct { border-left-color: var(--good); }
-.finding.partial { border-left-color: var(--warn); }
+.finding.proven, .finding.correct, .finding.partial { border-left-color: var(--good); }
 .finding.review { border-left-color: var(--accent); }
 .finding.unsafe { border-left-color: var(--bad); }
 .finding.diagnostic { border-left-color: var(--warn); }
 .finding-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 650; }
-.proven .status, .correct .status { color: var(--good); background: var(--good-bg); }
-.partial .status { color: var(--warn); background: var(--warn-bg); }
+.proven .status, .correct .status, .partial .status { color: var(--good); background: var(--good-bg); }
 .review .status { color: var(--accent); background: var(--accent-bg); }
 .unsafe .status { color: var(--bad); background: var(--bad-bg); }
 .diagnostic .status { color: var(--warn); background: var(--warn-bg); }
 .operation { background: var(--bg); border: 1px solid var(--border); }
 .capability { color: var(--accent); background: var(--accent-bg); }
 .ownership { color: var(--muted); background: var(--bg); border: 1px solid var(--border); }
-.guidance, .context-reason, .provenance, .value-contracts { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
-.guidance strong, .context-reason strong, .provenance > strong, .value-contracts > strong { display: block; margin-bottom: 2px; }
-.guidance span, .context-reason span { color: var(--muted); }
+.guidance, .recommended-action, .context-reason, .provenance, .value-contracts, .technical-evidence { margin: 0 0 10px; padding: 9px 11px; border-radius: 6px; background: var(--bg); }
+.guidance strong, .recommended-action > strong, .context-reason strong, .provenance > strong, .value-contracts > strong, .technical-evidence > strong { display: block; margin-bottom: 2px; }
+.guidance span, .recommended-action span, .context-reason span { color: var(--muted); }
+.recommended-action { border: 1px solid var(--border); }
+.proven .recommended-action, .correct .recommended-action, .partial .recommended-action { border-color: var(--good); background: var(--good-bg); }
+.review .recommended-action { border-color: var(--accent); background: var(--accent-bg); }
+.unsafe .recommended-action { border-color: var(--bad); background: var(--bad-bg); }
+.recommended-action .action-title { display: block; color: var(--text); font-weight: 700; }
+.protection-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
+.protection-summary > div { padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.protection-summary > div > strong { display: block; margin-bottom: 5px; }
+.protection-summary > .protection-positive { border-color: color-mix(in srgb, var(--good) 55%, var(--border)); }
+.protection-summary > .protection-negative { border-color: color-mix(in srgb, var(--bad) 55%, var(--border)); }
+.protection-summary ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.protection-summary li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 5px; }
+.protection-covered li > span:first-child { color: var(--good); font-weight: 800; }
+.protection-missing li > span:first-child { color: var(--bad); font-weight: 800; }
+.protection-summary li strong, .protection-summary li small { display: block; }
+.protection-summary li small, .protection-summary p { color: var(--muted); }
+.protection-summary p { margin: 0; }
 .provenance ol { margin: 6px 0 0; padding-left: 24px; color: var(--muted); }
 .provenance li + li { margin-top: 2px; }
 .value-contract + .value-contract { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
@@ -88,13 +104,17 @@ h2 { margin: 0; font-size: 18px; word-break: break-all; }
 .contract-effect { margin: 9px 0 0; padding: 7px 9px; border-left: 3px solid var(--accent); background: var(--panel); }
 .contract-effect strong { display: block; }
 .contract-effect span { color: var(--muted); }
-.pipeline-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 10px; }
+.pipeline-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 7px; }
 .pipeline { min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .pipeline > strong { display: block; margin-bottom: 7px; }
 .pipeline-steps, .current-escapes { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .pipeline-arrow { color: var(--muted); }
-.current-escape { display: flex; align-items: baseline; gap: 5px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); }
-.current-escape small, .pipeline-empty { color: var(--muted); }
+.operation-step { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+.operation-step code { color: var(--muted); font-size: 11px; }
+.current-escape { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 1px 7px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); }
+.current-escape strong { grid-column: 1 / -1; }
+.current-escape span { color: var(--text); }
+.current-escape code, .current-escape small, .pipeline-empty { color: var(--muted); }
 .line { margin-left: auto; color: var(--muted); }
 code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .expression { display: block; padding: 9px 11px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; background: var(--bg); }
@@ -111,7 +131,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .limitations code { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .empty { padding: 40px; text-align: center; color: var(--muted); }
 [hidden] { display: none !important; }
-@media (max-width: 850px) { .view-tabs, .controls { position: static; padding-left: 18px; padding-right: 18px; } .controls { grid-template-columns: 1fr; } .pipeline-comparison { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; padding: 18px; } nav { position: static; max-height: 260px; } .top { padding: 24px 18px; } .guide { padding: 0 18px; } }
+@media (max-width: 850px) { .view-tabs, .controls { position: static; padding-left: 18px; padding-right: 18px; } .controls { grid-template-columns: 1fr; } .pipeline-comparison, .protection-summary { grid-template-columns: 1fr; } .layout { grid-template-columns: 1fr; padding: 18px; } nav { position: static; max-height: 260px; } .top { padding: 24px 18px; } .guide { padding: 0 18px; } }
 </style>
 </head>
 <body>
@@ -128,15 +148,15 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <div class="metric"><strong>{{ summary.templates }}</strong>templates</div>
 <div class="metric"><strong>{{ summary.output_sites }}</strong>output sites</div>
 <button class="metric" type="button" data-summary-status="proven"><strong>{{ assessment_counts.proven }}</strong>statically proven safe</button>
-<button class="metric" type="button" data-summary-status="correct"><strong>{{ assessment_counts.correct }}</strong>current plan matches</button>
-<button class="metric" type="button" data-summary-status="partial"><strong>{{ assessment_counts.partial }}</strong>outer protection present</button>
-<button class="metric" type="button" data-summary-status="review"><strong>{{ assessment_counts.review }}</strong>findings to review</button>
+<button class="metric" type="button" data-summary-status="correct"><strong>{{ assessment_counts.correct }}</strong>correct contextual protection</button>
+<button class="metric" type="button" data-summary-status="partial"><strong>{{ assessment_counts.partial }}</strong>protected today</button>
+<button class="metric" type="button" data-summary-status="review"><strong>{{ assessment_counts.review }}</strong>trust reviews</button>
 <button class="metric" type="button" data-summary-status="unsafe"><strong>{{ assessment_counts.unsafe }}</strong>unsafe today</button>
 <button class="metric" type="button" data-summary-status="unavailable"><strong>{{ assessment_counts.unavailable }}</strong>pipelines unavailable</button>
 <button class="metric" type="button" data-summary-status="diagnostic"><strong>{{ summary.diagnostics }}</strong>diagnostics</button>
 </div>
 </header>
-<section class="guide"><div><strong>How to use this report</strong><p>The default view contains findings that need action now. Use the other views to review trust contracts, plan for future Twig support, or inspect findings with no urgent action. Statically proven findings show every assignment and selection step that restricts an expression to a finite set of template-defined outputs. This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Outer HTML protection present” means quoted-attribute breakout is prevented, but inner URL, JavaScript, or CSS handling may still be missing. Findings marked for review may be intrinsically safe expressions or output transformed by a custom lexer or component; check their runtime safety contract separately. “Pipeline unavailable” means current Twig has no built-in filter for every required operation. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
+<section class="guide"><div><strong>How to use this report</strong><ol><li><strong>Start with the status and recommended action.</strong> They describe the consequence for the application today.</li><li><strong>Compare “Already protected” with “Still missing”.</strong> This is the protection delta for the output site.</li><li><strong>Use the technical evidence when changing code.</strong> The inferred contextual pipeline is the ideal target, even when current Twig cannot implement every step directly.</li></ol><p>This is a contextual migration assessment, not a list of confirmed vulnerabilities. “Protected today” means the current strategy covers the output boundary even though a more precise contextual operation exists. “Unsafe today” means one or more inferred protections are missing. Findings marked for review depend on a runtime trust declaration that the analyzer cannot verify. For a complete URL, validate and normalize untrusted values in PHP, or declare genuinely trusted URL-producing callables as <code>is_safe: ['url']</code>. Never apply <code>e('url')</code> to a complete URL.</p></div></section>
 <div class="view-tabs" role="group" aria-label="Report view">
 <button class="view-tab" type="button" data-view="action" aria-pressed="true">Action now <span class="view-count">{{ view_counts.action }}</span></button>
 <button class="view-tab" type="button" data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">{{ view_counts.review }}</span></button>
@@ -145,10 +165,10 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 <button class="view-tab" type="button" data-view="all" aria-pressed="false">All <span class="view-count">{{ view_counts.all }}</span></button>
 </div>
 <div class="controls">
-<label><span hidden>Search</span><input id="search" type="search" placeholder="Filter templates, expressions, operations..."></label>
+<label><span hidden>Search</span><input id="search" type="search" placeholder="Filter templates, expressions, protections..."></label>
 <label><span hidden>Ownership</span><select id="ownership"><option value="">Application and dependencies</option><option value="application">Application ({{ ownership_counts.application }})</option><option value="dependency">Dependencies ({{ ownership_counts.dependency }})</option></select></label>
-<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Outer protection present</option><option value="review">Needs review</option><option value="proven">Statically proven safe</option><option value="correct">Current plan matches</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option><option value="diagnostic-ambiguity">Ambiguous template context</option><option value="diagnostic-error">Template error</option><option value="diagnostic-limitation">Analyzer limitation</option></select></label>
-<label><span hidden>Operation</span><select id="operation"><option value="">All operations</option>{% for operation in operations %}<option value="{{ operation }}">{{ operation }}</option>{% endfor %}</select></label>
+<label><span hidden>Assessment</span><select id="status"><option value="">All assessments in this view</option><option value="unsafe">Unsafe today</option><option value="partial">Protected today</option><option value="review">Trust declaration needs review</option><option value="proven">Statically proven safe</option><option value="correct">Correct contextual protection</option><option value="url-trust">URL validation or trusted metadata needed</option><option value="unavailable">Pipeline unavailable</option><option value="diagnostic">Diagnostics</option><option value="diagnostic-ambiguity">Ambiguous template context</option><option value="diagnostic-error">Template error</option><option value="diagnostic-limitation">Analyzer limitation</option></select></label>
+<label><span hidden>Operation</span><select id="operation"><option value="">All inferred protections</option>{% for operation in operations %}<option value="{{ operation.code }}" title="{{ operation.description }}">{{ operation.label }}</option>{% endfor %}</select></label>
 </div>
 <div class="layout">
 <aside class="navigation">

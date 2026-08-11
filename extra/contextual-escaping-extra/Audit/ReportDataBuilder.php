@@ -44,6 +44,23 @@ final class ReportDataBuilder
 
         foreach ($plans as $plan) {
             $assessment = $this->findingAssessor->assessPlan($plan);
+            $pipelineOperations = $this->describeOperations($plan['operations']);
+            $coveredOperations = $this->describeOperations($assessment['covered_operations']);
+            $missingOperations = $this->describeOperations($assessment['missing_operations']);
+            $protection = [
+                'covered' => $coveredOperations,
+                'missing' => $missingOperations,
+                'covered_tone' => $coveredOperations || 'proven' === $assessment['status'] ? 'positive' : 'neutral',
+                'missing_tone' => $missingOperations ? 'negative' : 'positive',
+                'covered_empty' => match ($assessment['status']) {
+                    'proven' => 'Every possible value is statically proven safe in this context.',
+                    'review' => 'No protection is established until the trust declaration is verified.',
+                    default => 'No recognized protection covers this output context.',
+                },
+                'missing_empty' => 'Nothing is missing for this output context.',
+                'missing_title' => !$missingOperations ? 'Protection gap' : ('review' === $assessment['status'] ? 'Protection to verify' : 'Still missing'),
+            ];
+            $currentEscapes = array_map($this->describeCurrentEscape(...), $plan['current_escapes']);
             $ownership = $this->classifyOwnership($plan['path']);
             $current = 'none' === $plan['current'] && $plan['current_safe'] ? 'safe for '.implode(', ', $plan['current_safe']) : $plan['current'];
             $contextReason = 'proven' === $assessment['status']
@@ -54,13 +71,13 @@ final class ReportDataBuilder
                 $plan['template'],
                 $plan['line'],
                 $ownership,
-                implode(' ', $plan['operations']),
+                implode(' ', array_map(static fn (array $operation): string => implode(' ', $operation), $pipelineOperations)),
                 $plan['context'],
                 $contextReason,
                 implode(' ', $plan['provenance']),
                 implode(' ', array_map(static fn (array $contract): string => implode(' ', $contract), $valueContracts)),
                 $current,
-                implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['automatic'] ? 'automatic' : 'explicit']), $plan['current_escapes'])),
+                implode(' ', array_map(static fn (array $escape): string => implode(' ', [$escape['scope'], $escape['expression'], $escape['strategy'], $escape['label'], $escape['automatic'] ? 'automatic' : 'explicit']), $currentEscapes)),
                 $assessment['label'],
                 $assessment['title'],
                 $assessment['guidance'],
@@ -72,10 +89,13 @@ final class ReportDataBuilder
                 'assessment' => $assessment,
                 'ownership' => $ownership,
                 'current_label' => $current,
+                'pipeline_operations' => $pipelineOperations,
+                'protection' => $protection,
                 'context_reason' => $contextReason,
                 'search' => $search,
                 'source' => $this->sourceExcerptBuilder->create($plan['path'], $plan['line'], $plan['expression']),
                 ...$plan,
+                'current_escapes' => $currentEscapes,
                 'value_contracts' => $valueContracts,
             ];
             $templateOwnership[$plan['template']] = $ownership;
@@ -143,11 +163,73 @@ final class ReportDataBuilder
             'assessment_counts' => $assessmentCounts,
             'view_counts' => $viewCounts,
             'ownership_counts' => $ownershipCounts,
-            'operations' => array_keys($operations),
+            'operations' => $this->describeOperations(array_keys($operations)),
             'navigation' => $this->buildNavigation($navigationEntries),
             'templates' => $templates,
             'unsupported_nodes' => $unsupported,
         ];
+    }
+
+    /**
+     * @param list<string> $operations
+     *
+     * @return list<array{code: string, label: string, description: string}>
+     */
+    private function describeOperations(array $operations): array
+    {
+        return array_map($this->describeOperation(...), $operations);
+    }
+
+    /**
+     * @return array{code: string, label: string, description: string}
+     */
+    private function describeOperation(string $operation): array
+    {
+        [$label, $description] = match ($operation) {
+            'HtmlText' => ['Escape HTML text', 'Prevents dynamic text from being interpreted as HTML markup.'],
+            'HtmlAttribute' => ['Protect a quoted HTML attribute', 'Prevents the value from ending the quoted attribute.'],
+            'HtmlAttributeUnquoted' => ['Protect an unquoted HTML attribute', 'Prevents the value from ending or splitting the unquoted attribute.'],
+            'HtmlRcdata' => ['Escape HTML RCDATA', 'Prevents the value from closing an element such as textarea or title.'],
+            'JavaScriptValue' => ['Serialize a JavaScript value', 'Produces a syntax-safe JavaScript value without allowing code injection.'],
+            'JavaScriptString' => ['Escape a JavaScript string', 'Prevents the value from ending the quoted JavaScript string.'],
+            'JavaScriptTemplateString' => ['Escape a JavaScript template string', 'Prevents the value from ending the template string or starting an interpolation.'],
+            'JavaScriptRegExp' => ['Escape a JavaScript regular expression', 'Prevents the value from changing the regular expression or following JavaScript syntax.'],
+            'CssValue' => ['Escape a CSS value', 'Keeps the value inside the current CSS declaration value.'],
+            'CssString' => ['Escape a CSS string', 'Prevents the value from ending the quoted CSS string.'],
+            'MetaRefreshDelay' => ['Validate the refresh delay', 'Restricts the value to a valid meta refresh delay.'],
+            'SrcsetFilter' => ['Validate a srcset value', 'Validates URL candidates and descriptors in the srcset value.'],
+            'UrlSchemeFilter' => ['Allow only safe URL schemes', 'Rejects dangerous schemes such as javascript in a complete URL.'],
+            'UrlNormalize' => ['Encode a complete URL', 'Encodes unsafe URL characters while preserving the complete URL structure.'],
+            'UrlPath' => ['Encode a URL path component', 'Prevents the value from changing the surrounding URL path structure.'],
+            'UrlQuery' => ['Encode a query or fragment component', 'Prevents the value from changing the surrounding query or fragment structure.'],
+            default => [$operation, 'Applies the inferred contextual protection.'],
+        };
+
+        return ['code' => $operation, 'label' => $label, 'description' => $description];
+    }
+
+    /**
+     * @param array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool} $escape
+     *
+     * @return array{strategy: string, scope: 'whole'|'nested', expression: string, automatic: bool, label: string}
+     */
+    private function describeCurrentEscape(array $escape): array
+    {
+        $label = match ($escape['strategy']) {
+            'html' => 'HTML escaping',
+            'html_attr' => 'HTML attribute escaping',
+            'html_attr_relaxed' => 'Relaxed HTML attribute escaping',
+            'js' => 'JavaScript string escaping',
+            'js_string' => 'JavaScript string escaping',
+            'js_template' => 'JavaScript template string escaping',
+            'js_regexp' => 'JavaScript regular expression escaping',
+            'css' => 'CSS string escaping',
+            'css_string' => 'CSS string escaping',
+            'url' => 'URL component encoding',
+            default => 'Dynamic or custom escaping',
+        };
+
+        return [...$escape, 'label' => $label];
     }
 
     /**
@@ -160,15 +242,15 @@ final class ReportDataBuilder
         [$meaning, $effect] = match ($contract['content_type']) {
             'Url' => [
                 'The result represents an entire URL value, not an individual path, query, or fragment component.',
-                'The result is analyzed as a complete URL rather than plain text. At a URL start, no scheme filter is added. The required pipeline still includes any encoding needed by the surrounding context.',
+                'The result is analyzed as a complete URL rather than plain text. At a URL start, no scheme filter is added. The inferred contextual pipeline still includes any encoding needed by the surrounding context.',
             ],
             'Html' => [
                 'The result is trusted as an HTML fragment rather than plain text.',
-                'HTML text escaping is not added. The required pipeline still includes any protection needed when the fragment is embedded in another context.',
+                'HTML text escaping is not added. The inferred contextual pipeline still includes any protection needed when the fragment is embedded in another context.',
             ],
             default => [
                 \sprintf('The result carries the %s semantic content type rather than plain text.', $this->getContentTypeLabel($contract['content_type'])),
-                'The required pipeline already accounts for this contract and still includes any operations needed by the surrounding output context.',
+                'The inferred contextual pipeline already accounts for this contract and still includes any operations needed by the surrounding output context.',
             ],
         };
 
