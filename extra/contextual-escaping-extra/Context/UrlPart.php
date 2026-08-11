@@ -25,6 +25,17 @@ enum UrlPart
     case UnsafeScheme;
     case Unknown;
 
+    public function describe(): string
+    {
+        return match ($this) {
+            self::Start => 'URL start',
+            self::Path => 'URL path',
+            self::QueryOrFragment => 'URL query or fragment',
+            self::UnsafeScheme => 'executable-scheme URL',
+            self::None, self::Unknown => 'ambiguous URL',
+        };
+    }
+
     public function consume(string $character): self
     {
         if ('?' === $character || '#' === $character) {

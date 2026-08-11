@@ -451,12 +451,7 @@ final class HtmlContext
         if (null !== $this->srcsetContext) {
             return 'srcset '.match ($this->srcsetContext->getState()) {
                 SrcsetState::BeforeUrl => 'candidate start',
-                SrcsetState::Url => match ($this->srcsetContext->getUrlPart()) {
-                    UrlPart::Start => 'URL start',
-                    UrlPart::Path => 'URL path',
-                    UrlPart::QueryOrFragment => 'URL query or fragment',
-                    UrlPart::None, UrlPart::Unknown => 'ambiguous URL',
-                },
+                SrcsetState::Url => $this->srcsetContext->getUrlPart()->describe(),
                 SrcsetState::UrlComma => 'ambiguous URL comma',
                 SrcsetState::BeforeDescriptor => 'descriptor start',
                 SrcsetState::Descriptor => 'descriptor',
@@ -483,14 +478,7 @@ final class HtmlContext
     {
         return \sprintf('a %s %s attribute', $delimiter, match ($this->attributeType) {
             HtmlAttributeType::Plain => 'plain HTML',
-            HtmlAttributeType::Url => match ($this->urlPart) {
-                UrlPart::Start => 'URL start',
-                UrlPart::Path => 'URL path',
-                UrlPart::QueryOrFragment => 'URL query or fragment',
-                UrlPart::UnsafeScheme => 'executable-scheme URL',
-                UrlPart::Unknown => 'ambiguous URL',
-                UrlPart::None => 'URL',
-            },
+            HtmlAttributeType::Url => UrlPart::None === $this->urlPart ? 'URL' : $this->urlPart->describe(),
             HtmlAttributeType::UrlList => 'URL list',
             HtmlAttributeType::Srcset => 'srcset',
             HtmlAttributeType::Style => 'style',
