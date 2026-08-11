@@ -330,7 +330,7 @@ final class Analyzer
         $blocks = [];
         $traitModules = [];
         foreach ($modules as $scopeModule) {
-            $moduleBlocks = [];
+            $traitBlocks = [];
             foreach ($scopeModule->getNode('traits') as $trait) {
                 $traitModule = $this->resolveTemplateExpression($trait->getNode('template'), $scopeModule);
                 if (null === $traitModule) {
@@ -344,16 +344,16 @@ final class Analyzer
                         continue;
                     }
                     $target = $trait->getNode('targets')->hasNode((string) $name) ? $trait->getNode('targets')->getNode((string) $name)->getAttribute('value') : $name;
-                    $moduleBlocks[(string) $target] = ['module' => $traitModule, 'node' => $block];
+                    $traitBlocks[(string) $target] = ['module' => $traitModule, 'node' => $block];
                 }
             }
             foreach ($scopeModule->getNode('blocks') as $name => $definition) {
                 $block = $this->findBlockNode($definition);
                 if (null !== $block) {
-                    $moduleBlocks[(string) $name] = ['module' => $scopeModule, 'node' => $block];
+                    $blocks[(string) $name][] = ['module' => $scopeModule, 'node' => $block];
                 }
             }
-            foreach ($moduleBlocks as $name => $definition) {
+            foreach ($traitBlocks as $name => $definition) {
                 $blocks[$name][] = $definition;
             }
         }

@@ -1902,6 +1902,14 @@ class LinterTest extends TestCase
             'index.html.twig',
             [[EscapeOperation::HtmlAttribute]],
         ];
+        yield 'block trait overridden with parent' => [
+            [
+                'index.html.twig' => '{% use "blocks.html.twig" %}{% block link %}{{ parent() }}{{ value }}">x</a>{% endblock %}',
+                'blocks.html.twig' => '{% block link %}<a href="{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
+        ];
         yield 'embed' => [
             [
                 'base.html.twig' => '<div title="{% block content %}{% endblock %}">',
