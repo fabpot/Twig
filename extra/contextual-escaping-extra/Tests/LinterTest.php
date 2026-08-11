@@ -1910,6 +1910,15 @@ class LinterTest extends TestCase
             'index.html.twig',
             [[EscapeOperation::UrlSchemeFilter, EscapeOperation::UrlNormalize, EscapeOperation::HtmlAttribute]],
         ];
+        yield 'nested block traits with parent calls' => [
+            [
+                'base.html.twig' => '{% block link %}<a href="{% endblock %}',
+                'middle.html.twig' => '{% use "base.html.twig" %}{% block link %}{{ parent() }}middle/{% endblock %}',
+                'index.html.twig' => '{% use "middle.html.twig" %}{% block link %}{{ parent() }}{{ value }}">x</a>{% endblock %}',
+            ],
+            'index.html.twig',
+            [[EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute]],
+        ];
         yield 'embed' => [
             [
                 'base.html.twig' => '<div title="{% block content %}{% endblock %}">',

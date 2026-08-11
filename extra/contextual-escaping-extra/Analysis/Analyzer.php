@@ -330,31 +330,12 @@ final class Analyzer
         $blocks = [];
         $traitModules = [];
         foreach ($modules as $scopeModule) {
-            $traitBlocks = [];
-            foreach ($scopeModule->getNode('traits') as $trait) {
-                $traitModule = $this->resolveTemplateExpression($trait->getNode('template'), $scopeModule);
-                if (null === $traitModule) {
-                    return null;
-                }
-                $traitModules[] = $traitModule;
-                $this->collectModuleIndependentDiagnostics($traitModule);
-                foreach ($traitModule->getNode('blocks') as $name => $definition) {
-                    $block = $this->findBlockNode($definition);
-                    if (null === $block) {
-                        continue;
-                    }
-                    $target = $trait->getNode('targets')->hasNode((string) $name) ? $trait->getNode('targets')->getNode((string) $name)->getAttribute('value') : $name;
-                    $traitBlocks[(string) $target] = ['module' => $traitModule, 'node' => $block];
-                }
+            if (null === $moduleBlocks = $this->collectModuleBlockDefinitions($scopeModule, $traitModules, [])) {
+                return null;
             }
-            foreach ($scopeModule->getNode('blocks') as $name => $definition) {
-                $block = $this->findBlockNode($definition);
-                if (null !== $block) {
-                    $blocks[(string) $name][] = ['module' => $scopeModule, 'node' => $block];
-                }
-            }
-            foreach ($traitBlocks as $name => $definition) {
-                $blocks[$name][] = $definition;
+            foreach ($moduleBlocks as $name => $definitions) {
+                $blocks[$name] ??= [];
+                array_push($blocks[$name], ...$definitions);
             }
         }
 
@@ -368,6 +349,54 @@ final class Analyzer
         }
 
         return ['modules' => $modules, 'blocks' => $blocks, 'imports' => $imports];
+    }
+
+    /**
+     * @param list<ModuleNode> $traitModules
+     * @param array<int, true> $seen
+     *
+     * @return array<string, list<array{module: ModuleNode, node: BlockNode}>>|null
+     */
+    private function collectModuleBlockDefinitions(ModuleNode $module, array &$traitModules, array $seen): ?array
+    {
+        $id = spl_object_id($module);
+        if (isset($seen[$id])) {
+            $this->addDiagnostic($module, DiagnosticCode::UnsupportedTemplateComposition, 'Recursive template traits are not supported.');
+
+            return null;
+        }
+        $seen[$id] = true;
+
+        $traitBlocks = [];
+        foreach ($module->getNode('traits') as $trait) {
+            $traitModule = $this->resolveTemplateExpression($trait->getNode('template'), $module);
+            if (null === $traitModule) {
+                return null;
+            }
+            $traitModules[] = $traitModule;
+            $this->registerEmbeddedModules($traitModule);
+            $this->collectModuleIndependentDiagnostics($traitModule);
+            if (null === $definitions = $this->collectModuleBlockDefinitions($traitModule, $traitModules, $seen)) {
+                return null;
+            }
+            foreach ($definitions as $name => $blockDefinitions) {
+                $target = $trait->getNode('targets')->hasNode($name) ? $trait->getNode('targets')->getNode($name)->getAttribute('value') : $name;
+                $traitBlocks[(string) $target] = $blockDefinitions;
+            }
+        }
+
+        $blocks = $traitBlocks;
+        foreach ($module->getNode('blocks') as $name => $definition) {
+            $block = $this->findBlockNode($definition);
+            if (null !== $block) {
+                $blocks[(string) $name] = [
+                    ['module' => $module, 'node' => $block],
+                    ...($traitBlocks[(string) $name] ?? []),
+                ];
+            }
+        }
+
+        return $blocks;
     }
 
     /**
