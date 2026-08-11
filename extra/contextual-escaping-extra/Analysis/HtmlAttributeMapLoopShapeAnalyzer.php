@@ -25,7 +25,6 @@ use Twig\Node\Node;
 use Twig\Node\Nodes;
 use Twig\Node\PrintNode;
 use Twig\Node\TextNode;
-use Twig\TwigFilter;
 
 /**
  * @internal
@@ -185,16 +184,6 @@ final class HtmlAttributeMapLoopShapeAnalyzer
 
     private function isEscapeFilter(FilterExpression $expression): bool
     {
-        $filter = $expression->getAttribute('twig_callable');
-        if (!$filter instanceof TwigFilter || !\in_array($filter->getName(), ['e', 'escape'], true)) {
-            return false;
-        }
-        $arguments = $expression->getNode('arguments');
-        if (!\count($arguments)) {
-            return true;
-        }
-        $strategy = $arguments->getNode(0);
-
-        return $strategy instanceof ConstantExpression && \in_array($strategy->getAttribute('value'), ['html', 'html_attr', 'html_attr_relaxed'], true);
+        return EscapeFilter::matches($expression) && \in_array(EscapeFilter::getConstantStrategy($expression), ['html', 'html_attr', 'html_attr_relaxed'], true);
     }
 }

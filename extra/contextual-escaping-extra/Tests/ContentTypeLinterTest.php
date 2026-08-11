@@ -273,4 +273,12 @@ class ContentTypeLinterTest extends AbstractLinterTestCase
         $this->assertSame([], $result->getDiagnostics());
         $this->assertSame([[EscapeOperation::HtmlText], []], $this->getPlans($result));
     }
+
+    public function testDoesNotTreatABooleanFilterArgumentAsAutomaticEscaping(): void
+    {
+        $result = $this->lint('{{ value|raw|slice(0, 3, true) }}');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($result));
+    }
 }

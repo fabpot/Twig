@@ -190,7 +190,7 @@ final class StaticExpressionAnalyzer
             return $inputs;
         }
 
-        if (\in_array($filter->getName(), ['e', 'escape'], true)) {
+        if (EscapeFilter::matches($expression)) {
             return $this->analyzeEscapeFilter($expression, $inputs);
         }
 
@@ -229,19 +229,11 @@ final class StaticExpressionAnalyzer
 
     private function analyzeEscapeFilter(FilterExpression $expression, FiniteStaticValueSet $inputs): ?FiniteStaticValueSet
     {
-        $arguments = $expression->getNode('arguments');
-        $strategy = 'html';
-        if (\count($arguments)) {
-            $strategyNode = $arguments->getNode(0);
-            if (!$strategyNode instanceof ConstantExpression || !\is_string($strategyNode->getAttribute('value'))) {
-                return null;
-            }
-            $strategy = $strategyNode->getAttribute('value');
-        }
+        $strategy = EscapeFilter::getConstantStrategy($expression);
         if (!\in_array($strategy, ['html', 'js', 'css', 'html_attr', 'html_attr_relaxed', 'url'], true)) {
             return null;
         }
-        $automatic = $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value');
+        $automatic = EscapeFilter::isAutomatic($expression);
         $escaper = $this->environment->getRuntime(EscaperRuntime::class);
         $values = [];
         try {

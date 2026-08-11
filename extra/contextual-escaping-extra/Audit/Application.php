@@ -15,11 +15,11 @@ use Twig\Environment;
 use Twig\Error\LoaderError;
 use Twig\Extra\ContextualEscaping\Analysis\CurrentEscapingSafetyAnalyzer;
 use Twig\Extra\ContextualEscaping\Analysis\DiagnosticCode;
+use Twig\Extra\ContextualEscaping\Analysis\EscapeFilter;
 use Twig\Extra\ContextualEscaping\Analysis\EscapeOperation;
 use Twig\Extra\ContextualEscaping\Analysis\ValueContract;
 use Twig\Extra\ContextualEscaping\Linter;
 use Twig\Node\Expression\AbstractExpression;
-use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\FunctionExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
@@ -287,13 +287,12 @@ final class Application
         $seen[$id] = true;
 
         if ($node instanceof FilterExpression && null !== $strategy = $this->getEscapeStrategy($node)) {
-            $arguments = $node->getNode('arguments');
             $input = $node->getNode('node');
             $escapes[] = [
                 'strategy' => $strategy,
                 'scope' => $wholeOutput ? 'whole' : 'nested',
                 'expression' => $input instanceof AbstractExpression ? $this->describeExpression($input) : 'expression',
-                'automatic' => $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value'),
+                'automatic' => EscapeFilter::isAutomatic($node),
             ];
             $this->collectCurrentEscapes($input, false, $escapes, $seen);
 
@@ -307,18 +306,11 @@ final class Application
 
     private function getEscapeStrategy(FilterExpression $expression): ?string
     {
-        $filter = $expression->getAttribute('twig_callable');
-        if (!$filter instanceof TwigFilter || !\in_array($filter->getName(), ['e', 'escape'], true)) {
+        if (!EscapeFilter::matches($expression)) {
             return null;
         }
 
-        $arguments = $expression->getNode('arguments');
-        if (!\count($arguments)) {
-            return 'html';
-        }
-        $strategy = $arguments->getNode(0);
-
-        return $strategy instanceof ConstantExpression && \is_string($strategy->getAttribute('value')) ? $strategy->getAttribute('value') : 'dynamic';
+        return EscapeFilter::getConstantStrategy($expression) ?? 'dynamic';
     }
 
     private function describeExpression(AbstractExpression $expression): string

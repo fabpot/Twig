@@ -1101,27 +1101,22 @@ final class Analyzer
             if (!$filter instanceof TwigFilter) {
                 return new ContentTypeSet([ContentType::PlainText]);
             }
-            if ($this->isAutomaticEscape($expression)) {
-                return $inputTypes;
-            }
             if ('raw' === $filter->getName()) {
                 return new ContentTypeSet([ContentType::TrustedInnermost]);
             }
-            if (\in_array($filter->getName(), ['e', 'escape'], true)) {
-                $arguments = $expression->getNode('arguments');
-                if (!\count($arguments)) {
-                    return new ContentTypeSet([ContentType::Html]);
+            if (EscapeFilter::matches($expression)) {
+                if (EscapeFilter::isAutomatic($expression)) {
+                    return $inputTypes;
                 }
-                $strategy = $arguments->getNode(0);
-                if (!$strategy instanceof ConstantExpression || !\is_string($strategy->getAttribute('value'))) {
+                if (null === $strategy = EscapeFilter::getConstantStrategy($expression)) {
                     $this->addDiagnostic($expression, DiagnosticCode::MismatchedExplicitEscaping, 'A dynamic escaping strategy has no contextual content type.');
 
                     return new ContentTypeSet([ContentType::PlainText]);
                 }
 
-                $contentTypes = $this->contentTypesForStrategies([$strategy->getAttribute('value')]);
+                $contentTypes = $this->contentTypesForStrategies([$strategy]);
                 if ($contentTypes->isPlainText()) {
-                    $this->addDiagnostic($expression, DiagnosticCode::MismatchedExplicitEscaping, \sprintf('The explicit "%s" escaping strategy has no contextual content type.', $strategy->getAttribute('value')));
+                    $this->addDiagnostic($expression, DiagnosticCode::MismatchedExplicitEscaping, \sprintf('The explicit "%s" escaping strategy has no contextual content type.', $strategy));
                 }
 
                 return $contentTypes;
@@ -1597,13 +1592,6 @@ final class Analyzer
             HtmlState::AttributeValueDoubleQuoted, HtmlState::AttributeValueSingleQuoted, HtmlState::AttributeValueUnquoted => $context,
             default => $context->toDead(),
         };
-    }
-
-    private function isAutomaticEscape(FilterExpression $node): bool
-    {
-        $arguments = $node->getNode('arguments');
-
-        return $arguments->hasNode(2) && $arguments->getNode(2) instanceof ConstantExpression && true === $arguments->getNode(2)->getAttribute('value');
     }
 
     private function collectModuleIndependentDiagnostics(ModuleNode $module): void
