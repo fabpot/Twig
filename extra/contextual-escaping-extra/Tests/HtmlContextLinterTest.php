@@ -203,6 +203,8 @@ class HtmlContextLinterTest extends AbstractLinterTestCase
         $result = $this->lint("<p>text</p>\n<div style=\"{{ value }}\">content</div>", 'page.html.twig');
         $diagnostic = $result->getDiagnostics()[0];
 
+        $this->assertSame(DiagnosticCode::UnsupportedOutputContext, $diagnostic->getCode());
+        $this->assertSame('Output expressions in CSS property-name contexts are not supported.', $diagnostic->getMessage());
         $this->assertSame(2, $diagnostic->getTemplateLine());
         $this->assertSame('page.html.twig', $diagnostic->getTemplateName());
     }
