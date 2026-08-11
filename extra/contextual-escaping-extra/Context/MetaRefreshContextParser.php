@@ -101,42 +101,27 @@ final class MetaRefreshContextParser
                     $context = $context->withState(MetaRefreshState::Url, UrlPart::Start);
                     continue 2;
                 case MetaRefreshState::Url:
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
 
                 case MetaRefreshState::UrlDoubleQuoted:
                     if ('"' === $character) {
                         return $context->withState(MetaRefreshState::Done);
                     }
 
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
 
                 case MetaRefreshState::UrlSingleQuoted:
                     if ("'" === $character) {
                         return $context->withState(MetaRefreshState::Done);
                     }
 
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
 
                 case MetaRefreshState::Done:
                 case MetaRefreshState::Unknown:
                     return $context;
             }
         }
-    }
-
-    private function consumeUrlCharacter(MetaRefreshContext $context, string $character): MetaRefreshContext
-    {
-        if ('?' === $character || '#' === $character) {
-            return $context->withUrlPart(UrlPart::QueryOrFragment);
-        }
-        if ('&' === $character && UrlPart::QueryOrFragment !== $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Unknown);
-        }
-        if (UrlPart::Start === $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Path);
-        }
-
-        return $context;
     }
 
     private function isWhitespace(string $character): bool

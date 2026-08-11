@@ -24,4 +24,19 @@ enum UrlPart
     case QueryOrFragment;
     case UnsafeScheme;
     case Unknown;
+
+    public function consume(string $character): self
+    {
+        if ('?' === $character || '#' === $character) {
+            return self::QueryOrFragment;
+        }
+        if ('&' === $character && self::QueryOrFragment !== $this) {
+            return self::Unknown;
+        }
+        if (self::Start === $this) {
+            return self::Path;
+        }
+
+        return $this;
+    }
 }

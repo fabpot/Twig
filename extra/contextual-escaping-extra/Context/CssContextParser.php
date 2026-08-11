@@ -234,7 +234,7 @@ final class CssContextParser
                         return $this->startUrlEscape($context);
                     }
 
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
 
                 case CssState::UrlDoubleQuoted:
                 case CssState::UrlSingleQuoted:
@@ -250,7 +250,7 @@ final class CssContextParser
                         return $context->withState(CssState::Unknown);
                     }
 
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
 
                 case CssState::UrlAfterValue:
                     if ($this->isWhitespace($character)) {
@@ -284,21 +284,6 @@ final class CssContextParser
         }
 
         return $context->withEscapeDigits(0);
-    }
-
-    private function consumeUrlCharacter(CssContext $context, string $character): CssContext
-    {
-        if ('?' === $character || '#' === $character) {
-            return $context->withUrlPart(UrlPart::QueryOrFragment);
-        }
-        if ('&' === $character && UrlPart::QueryOrFragment !== $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Unknown);
-        }
-        if (UrlPart::Start === $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Path);
-        }
-
-        return $context;
     }
 
     private function startsIdentifier(string $character): bool

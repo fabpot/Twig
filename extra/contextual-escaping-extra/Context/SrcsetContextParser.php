@@ -37,7 +37,7 @@ final class SrcsetContextParser
                         return $context->withState(SrcsetState::UrlComma, $context->getUrlPart());
                     }
 
-                    return $this->consumeUrlCharacter($context, $character);
+                    return $context->withUrlPart($context->getUrlPart()->consume($character));
                 case SrcsetState::UrlComma:
                     if (',' === $character) {
                         return $context;
@@ -91,21 +91,6 @@ final class SrcsetContextParser
                     return $context;
             }
         }
-    }
-
-    private function consumeUrlCharacter(SrcsetContext $context, string $character): SrcsetContext
-    {
-        if ('?' === $character || '#' === $character) {
-            return $context->withUrlPart(UrlPart::QueryOrFragment);
-        }
-        if ('&' === $character && UrlPart::QueryOrFragment !== $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Unknown);
-        }
-        if (UrlPart::Start === $context->getUrlPart()) {
-            return $context->withUrlPart(UrlPart::Path);
-        }
-
-        return $context;
     }
 
     private function isWhitespace(string $character): bool
