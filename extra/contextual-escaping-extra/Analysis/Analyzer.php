@@ -707,6 +707,14 @@ final class Analyzer
 
     private function analyzeModuleWithVariables(ModuleNode $module, HtmlContext $context, Node $origin, ?Node $variables, bool $only): HtmlContext
     {
+        return $this->analyzeInVariableScope($variables, $only, fn (): HtmlContext => $this->analyzeModule($module, $context, $origin));
+    }
+
+    /**
+     * @param \Closure(): HtmlContext $analyze
+     */
+    private function analyzeInVariableScope(?Node $variables, bool $only, \Closure $analyze): HtmlContext
+    {
         $contentTypes = $this->contentTypes;
         $staticValues = $this->staticValues;
         if (null !== $variables) {
@@ -715,7 +723,7 @@ final class Analyzer
             $this->contentTypes = [];
             $this->staticValues = [];
         }
-        $context = $this->analyzeModule($module, $context, $origin);
+        $context = $analyze();
         $this->contentTypes = $contentTypes;
         $this->staticValues = $staticValues;
 
@@ -1293,19 +1301,11 @@ final class Analyzer
 
     private function analyzeWith(WithNode $node, HtmlContext $context, string|bool|null $explicitAutoescape): HtmlContext
     {
-        $contentTypes = $this->contentTypes;
-        $staticValues = $this->staticValues;
-        if ($node->hasNode('variables')) {
-            $this->applyVariableContentTypes($node->getNode('variables'), $node->getAttribute('only'));
-        } elseif ($node->getAttribute('only')) {
-            $this->contentTypes = [];
-            $this->staticValues = [];
-        }
-        $context = $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape);
-        $this->contentTypes = $contentTypes;
-        $this->staticValues = $staticValues;
-
-        return $context;
+        return $this->analyzeInVariableScope(
+            $node->hasNode('variables') ? $node->getNode('variables') : null,
+            $node->getAttribute('only'),
+            fn (): HtmlContext => $this->analyzeNode($node->getNode('body'), $context, $explicitAutoescape),
+        );
     }
 
     private function applyVariableContentTypes(Node $variables, bool $only = false): void
