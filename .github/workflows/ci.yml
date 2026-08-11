@@ -109,7 +109,7 @@ jobs:
 
         runs-on: 'ubuntu-latest'
 
-        continue-on-error: true
+        continue-on-error: ${{ matrix.extension != 'contextual-escaping-extra' }}
 
         env:
             SYMFONY_PHPUNIT_VERSION: ${{ matrix.php-version == '8.1' && '9.6' || '11.3' }}

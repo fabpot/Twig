@@ -2,6 +2,7 @@
     "subtrees": {
         "twig-extra-bundle": "extra/twig-extra-bundle",
         "cache-extra": "extra/cache-extra",
+        "contextual-escaping-extra": "extra/contextual-escaping-extra",
         "cssinliner-extra": "extra/cssinliner-extra",
         "html-extra": "extra/html-extra",
         "inky-extra": "extra/inky-extra",
