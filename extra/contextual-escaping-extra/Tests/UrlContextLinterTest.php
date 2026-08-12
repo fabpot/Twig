@@ -294,6 +294,16 @@ class UrlContextLinterTest extends AbstractLinterTestCase
         yield 'query delimiter after an executable scheme' => ['<a href="javascript:void(0)?next={{ value }}">'];
         yield 'trusted value after an executable scheme' => ['<a href="javascript:{{ value|raw }}">'];
         yield 'static executable scheme expression' => ['<a href="{{ "javascript:" }}{{ value }}">'];
+        yield 'identical executable scheme branches' => ['<a href="{% if condition %}javascript:{% else %}javascript:{% endif %}{{ value }}">'];
+    }
+
+    public function testRejectsBranchesMixingExecutableAndSafeSchemes(): void
+    {
+        $result = $this->lint('<a href="{% if condition %}javascript:{% else %}/path/{% endif %}{{ value }}">');
+
+        $this->assertSame([DiagnosticCode::AmbiguousControlFlow], $this->getDiagnosticCodes($result));
+        $this->assertStringContainsString('executable-scheme URL', $result->getDiagnostics()[0]->getMessage());
+        $this->assertStringContainsString('URL path', $result->getDiagnostics()[0]->getMessage());
     }
 
     /**

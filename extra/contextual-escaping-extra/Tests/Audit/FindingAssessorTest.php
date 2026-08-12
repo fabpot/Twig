@@ -45,4 +45,13 @@ final class FindingAssessorTest extends TestCase
         $this->assertSame(['UrlSchemeFilter', 'UrlNormalize'], $assessment['missing_operations']);
         $this->assertSame(['action', 'future'], $assessment['views']);
     }
+
+    public function testAssessesExecutableUrlSchemeDiagnostics(): void
+    {
+        $assessment = (new FindingAssessor())->assessDiagnostic('UnsafeUrlScheme');
+
+        $this->assertSame('diagnostic-error', $assessment['assessment']);
+        $this->assertSame('Executable URL scheme', $assessment['label']);
+        $this->assertSame('Remove the executable URL scheme', $assessment['title']);
+    }
 }
