@@ -160,6 +160,61 @@ By default, the filter uses the current locale. You can pass it explicitly::
     {# 12,345 #}
     {{ '12.345'|format_number(locale: 'fr') }}
 
+.. _format-number-defaults:
+
+Configuring Application-Wide Defaults
+-------------------------------------
+
+When your application needs the same number settings in every template, create a
+``NumberFormatter`` and pass it as the second argument to ``IntlExtension``::
+
+    // config/twig.php
+    use Twig\Environment;
+    use Twig\Extra\Intl\IntlExtension;
+    use Twig\Loader\ArrayLoader;
+
+    require_once dirname(__DIR__).'/vendor/autoload.php';
+
+    \Locale::setDefault('en');
+
+    $formatter = new \NumberFormatter('en', \NumberFormatter::DECIMAL);
+    $formatter->setAttribute(\NumberFormatter::FRACTION_DIGITS, 2);
+    $formatter->setTextAttribute(\NumberFormatter::POSITIVE_SUFFIX, ' points');
+    $formatter->setTextAttribute(\NumberFormatter::NEGATIVE_SUFFIX, ' points');
+    $formatter->setSymbol(\NumberFormatter::MINUS_SIGN_SYMBOL, '−');
+
+    $twig = new Environment(new ArrayLoader([
+        'dashboard' => '{{ score|format_number }}',
+    ]));
+    $twig->addExtension(new IntlExtension(null, $formatter));
+
+    echo $twig->render('dashboard', ['score' => -1234.5]);
+    // −1,234.50 points
+
+The configured formatter supplies defaults to ``format_number``, every
+``format_*_number`` shortcut and ``format_currency``. Twig uses the current
+values of:
+
+* every number attribute supported by the ``attrs`` argument and listed above;
+* every text attribute available through
+  ``NumberFormatter::setTextAttribute()``;
+* every symbol available through ``NumberFormatter::setSymbol()``.
+
+This includes values initialized by the formatter's locale and style, not only
+values your application changed explicitly. An ``attrs`` entry passed to a
+filter overrides the matching number attribute. Text attributes and symbols
+cannot be overridden by filter arguments, so their configured values remain in
+effect.
+
+The locale and style used to create the configured formatter do not become the
+locale and style defaults for filter calls. A call without ``locale`` still uses
+``Locale::getDefault()``. ``format_number`` still defaults to the ``decimal``
+style, each ``format_*_number`` shortcut selects its named style and
+``format_currency`` selects the ``currency`` style. Passing an explicit locale
+or style does not discard the configured attributes, text attributes or symbols.
+As a result, their prefixes, suffixes and symbols can also affect calls that
+select another locale or style.
+
 .. note::
 
     The ``format_number`` filter is part of the ``IntlExtension`` which is not

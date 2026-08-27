@@ -18,6 +18,10 @@ You can pass attributes to tweak the output:
     {# €1,000,000.0000 #}
     {{ '1000000'|format_currency('EUR', {fraction_digit: 4}) }}
 
+See :ref:`format-number-defaults` for the application-wide defaults used by this
+filter. Currency-related text attributes and symbols in those defaults can
+customize how the requested currency is displayed.
+
 The list of supported options:
 
 * ``grouping_used``: Specifies whether to use grouping separator for thousands::
