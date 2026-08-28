@@ -29,6 +29,12 @@ $linter = Linter::create($twig);
 $results = $linter->lintDirectory(__DIR__.'/templates');
 ```
 
+By default, `lintTemplate()` analyzes `.html.twig`, `.js.twig`, and `.css.twig`
+templates, and `lintDirectory()` discovers the same file types. Standalone
+JavaScript and CSS templates are analyzed from their language root context.
+When a template includes another template, the caller's lexical context applies
+regardless of the included template's file name.
+
 For a Symfony full-stack application, run:
 
 ```console
