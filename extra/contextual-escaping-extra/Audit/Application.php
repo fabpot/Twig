@@ -338,17 +338,18 @@ final class Application
             return false;
         }
 
-        $operation = match ($currentStrategies[0]) {
-            'html' => EscapeOperation::HtmlText,
-            'html_attr', 'html_attr_relaxed' => EscapeOperation::HtmlAttribute,
-            'js', 'js_string' => EscapeOperation::JavaScriptString,
-            'js_template' => EscapeOperation::JavaScriptTemplateString,
-            'js_regexp' => EscapeOperation::JavaScriptRegExp,
-            'css', 'css_string' => EscapeOperation::CssString,
-            default => null,
-        };
+        $operation = $operations[0];
 
-        return $operations[0] === $operation;
+        return match ($currentStrategies[0]) {
+            'html' => EscapeOperation::HtmlText === $operation,
+            'html_attr', 'html_attr_relaxed' => EscapeOperation::HtmlAttribute === $operation,
+            'js', 'js_string' => EscapeOperation::JavaScriptString === $operation,
+            'js_template' => EscapeOperation::JavaScriptTemplateString === $operation,
+            'js_regexp' => EscapeOperation::JavaScriptRegExp === $operation,
+            'css' => \in_array($operation, [EscapeOperation::CssValue, EscapeOperation::CssString], true),
+            'css_string' => EscapeOperation::CssString === $operation,
+            default => false,
+        };
     }
 
     private function getExpressionSnippet(PrintNode $node): ?string

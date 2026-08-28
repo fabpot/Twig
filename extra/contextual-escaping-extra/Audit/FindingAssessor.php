@@ -49,7 +49,6 @@ final class FindingAssessor
             'JavaScriptValue',
             'JavaScriptTemplateString',
             'JavaScriptRegExp',
-            'CssValue',
             'MetaRefreshDelay',
             'SrcsetFilter',
             'UrlSchemeFilter',
@@ -206,6 +205,7 @@ final class FindingAssessor
             'JavaScriptString' => ['js', 'js_string'],
             'JavaScriptTemplateString' => ['js_template'],
             'JavaScriptRegExp' => ['js_regexp'],
+            'CssValue' => ['css'],
             'CssString' => ['css', 'css_string'],
             default => [],
         };

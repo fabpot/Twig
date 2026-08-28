@@ -31,6 +31,35 @@ final class FindingAssessorTest extends TestCase
         $this->assertSame(['no-urgent'], $assessment['views']);
     }
 
+    public function testTreatsCssEscapingAsOuterProtectionForADeclarationValue(): void
+    {
+        $assessment = (new FindingAssessor())->assessPlan([
+            'operations' => ['CssValue'],
+            'current' => 'css',
+            'correct' => false,
+        ]);
+
+        $this->assertSame('partial', $assessment['status']);
+        $this->assertSame(['CssValue'], $assessment['covered_operations']);
+        $this->assertSame([], $assessment['missing_operations']);
+        $this->assertFalse($assessment['unavailable']);
+    }
+
+    public function testTreatsMissingCssValueProtectionAsAvailable(): void
+    {
+        $assessment = (new FindingAssessor())->assessPlan([
+            'operations' => ['CssValue'],
+            'current' => 'html',
+            'correct' => false,
+            'plain_variable' => true,
+        ]);
+
+        $this->assertSame('unsafe', $assessment['status']);
+        $this->assertSame(['CssValue'], $assessment['missing_operations']);
+        $this->assertFalse($assessment['unavailable']);
+        $this->assertSame(['action'], $assessment['views']);
+    }
+
     public function testTreatsMissingInnerProtectionAsUnsafeToday(): void
     {
         $assessment = (new FindingAssessor())->assessPlan([
