@@ -259,21 +259,69 @@ class TemplateCompositionLinterTest extends AbstractLinterTestCase
             'index.html.twig',
             [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
         ];
-        yield 'transformed standalone JavaScript include remains plain text' => [
+        yield 'standalone JavaScript assigned include remains plain text' => [
             [
-                'parent.js.twig' => 'const output = {{ include("child.js.twig")|upper }};',
-                'child.js.twig' => 'const child = "{{ value }}";',
+                'parent.js.twig' => '{% set content = include("child.html.twig") %}const output = "{{ content }}";',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
             ],
             'parent.js.twig',
-            [[EscapeOperation::JavaScriptString], [EscapeOperation::JavaScriptValue]],
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone CSS assigned include remains plain text' => [
+            [
+                'parent.css.twig' => '{% set content = include("child.html.twig") %}.parent { color: {{ content }}; }',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssValue]],
+        ];
+        yield 'standalone JavaScript with include remains plain text' => [
+            [
+                'parent.js.twig' => '{% with {content: include("child.html.twig")} %}const output = "{{ content }}";{% endwith %}',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone CSS with include remains plain text' => [
+            [
+                'parent.css.twig' => '{% with {content: include("child.html.twig")} %}.parent { color: {{ content }}; }{% endwith %}',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssValue]],
+        ];
+        yield 'standalone JavaScript macro include argument remains plain text' => [
+            [
+                'parent.js.twig' => '{% macro render(content) %}const output = "{{ content }}";{% endmacro %}{{ _self.render(include("child.html.twig")) }}',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone CSS macro include argument remains plain text' => [
+            [
+                'parent.css.twig' => '{% macro render(content) %}.parent { color: {{ content }}; }{% endmacro %}{{ _self.render(include("child.html.twig")) }}',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssValue]],
+        ];
+        yield 'transformed standalone JavaScript include remains plain text' => [
+            [
+                'parent.js.twig' => 'const output = "{{ include("child.html.twig")|upper }}";',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString]],
         ];
         yield 'transformed standalone CSS include remains plain text' => [
             [
-                'parent.css.twig' => '.parent { color: {{ include("child.css.twig")|upper }}; }',
-                'child.css.twig' => '.child { color: {{ value }}; }',
+                'parent.css.twig' => '.parent { color: {{ include("child.html.twig")|upper }}; }',
+                'child.html.twig' => '<section><!-- static comment -->{{ child_value }}</section>',
             ],
             'parent.css.twig',
-            [[EscapeOperation::CssValue], [EscapeOperation::CssValue]],
+            [[EscapeOperation::CssValue]],
         ];
         yield 'trusted include function' => [
             [

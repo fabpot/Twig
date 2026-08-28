@@ -1101,8 +1101,12 @@ final class Analyzer
         }
 
         if ($this->isDirectCompositionExpression($expression)) {
+            if (DocumentType::Html !== $this->documentType) {
+                return new ContentTypeSet([ContentType::PlainText]);
+            }
+
             $output = $this->analyzeCompositionExpression($expression, $this->createDocumentContext(), $expression);
-            if (HtmlState::Dead === $output->getState() || DocumentType::Html !== $this->documentType) {
+            if (HtmlState::Dead === $output->getState()) {
                 return new ContentTypeSet([ContentType::PlainText]);
             }
             if (HtmlState::Text !== $output->getState()) {
