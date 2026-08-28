@@ -159,6 +159,7 @@ class Kernel
         $twig = new Environment($loader, [
             'autoescape' => static fn (string $name): string|false => match ($name) {
                 'correct-attribute.html.twig' => 'html_attr',
+                'correct-css.css.twig' => 'css',
                 'correct-javascript.html.twig' => 'js',
                 'unsafe-text.html.twig' => false,
                 default => 'html',

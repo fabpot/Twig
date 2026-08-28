@@ -36,6 +36,21 @@ final class HtmlContext
     ) {
     }
 
+    public static function forHtmlDocument(): self
+    {
+        return new self();
+    }
+
+    public static function forJavaScriptDocument(): self
+    {
+        return new self(HtmlState::JavaScriptDocument, javaScriptContext: new JavaScriptContext());
+    }
+
+    public static function forCssDocument(): self
+    {
+        return new self(HtmlState::CssDocument, cssContext: CssContext::forStylesheet());
+    }
+
     public function getState(): HtmlState
     {
         return $this->state;
@@ -439,10 +454,10 @@ final class HtmlContext
 
     public function describe(): string
     {
-        if (null !== $this->javaScriptContext && ($this->state->isScriptData() || HtmlAttributeType::JavaScript === $this->attributeType)) {
+        if (null !== $this->javaScriptContext && (HtmlState::JavaScriptDocument === $this->state || $this->state->isScriptData() || HtmlAttributeType::JavaScript === $this->attributeType)) {
             return 'JavaScript '.$this->javaScriptContext->getState()->name;
         }
-        if (null !== $this->cssContext && (HtmlState::RawText === $this->state || HtmlAttributeType::Style === $this->attributeType)) {
+        if (null !== $this->cssContext && (HtmlState::CssDocument === $this->state || HtmlState::RawText === $this->state || HtmlAttributeType::Style === $this->attributeType)) {
             return 'CSS '.$this->cssContext->getState()->name;
         }
         if (null !== $this->metaRefreshContext) {
@@ -462,6 +477,7 @@ final class HtmlContext
         }
 
         return match ($this->state) {
+            HtmlState::JavaScriptDocument, HtmlState::CssDocument => throw new \LogicException('A document context requires a language context.'),
             HtmlState::Text => 'HTML text',
             HtmlState::AttributeValueDoubleQuoted => $this->describeAttribute('double-quoted'),
             HtmlState::AttributeValueSingleQuoted => $this->describeAttribute('single-quoted'),

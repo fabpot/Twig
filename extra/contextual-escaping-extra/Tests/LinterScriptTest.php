@@ -30,6 +30,7 @@ final class LinterScriptTest extends TestCase
                 'contextual.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
                 "contextual.html.twig:4 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ {'path': path, 'closing': '}}'}.path }}",
                 'correct-attribute.html.twig:1 [EscapePlan] HtmlAttribute [Current: html_attr, correct]: {{ value }}',
+                'correct-css.css.twig:1 [EscapePlan] CssString [Current: css, correct]: {{ value }}',
                 'correct-javascript.html.twig:1 [EscapePlan] JavaScriptString [Current: js, correct]: {{ value }}',
                 '@Dependency/link.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ dependency_url }}',
                 "incorrect-explicit.html.twig:1 [EscapePlan] HtmlAttribute [Current: html, incorrect]: {{ value|e('html') }}",
@@ -37,12 +38,13 @@ final class LinterScriptTest extends TestCase
                 'legacy-safe.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ legacy_safe() }}',
                 "nested-escaping.html.twig:1 [EscapePlan] JavaScriptString [Current: html, incorrect]: {{ base ~ '?next=' ~ path|e('url') }}",
                 'nested/tree.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: {{ path }}',
+                'child.html.twig:1 [EscapePlan] JavaScriptString [Current: html, incorrect]: {{ value }}',
                 'transformed-component.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <twig:Link href="{{',
                 'transformed-output.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: <app:output />',
                 'transformed.html.twig:1 [EscapePlan] UrlSchemeFilter -> UrlNormalize -> HtmlAttribute [Current: html, incorrect]: <app:url />',
                 "unsafe-text.html.twig:1 [EscapePlan] HtmlText [Current: none, incorrect]: {{ condition ? value|e('html')|replace({'&lt;': '<'}) : other|e('html') }}",
                 '[UnsupportedNode] 2 occurrences: The "App\\UnsupportedNode" node has no contextual escaping analyzer.',
-                'Analyzed 18 templates and 17 output sites; found 14 contextual escape plans (2 correct, 12 incorrect) and 3 diagnostics.',
+                'Analyzed 21 templates and 19 output sites; found 16 contextual escape plans (3 correct, 13 incorrect) and 3 diagnostics.',
                 'Proved 1 finite static output site safe.',
                 'HTML report: '.$report,
                 'JSON report: '.$jsonReport,
@@ -50,19 +52,28 @@ final class LinterScriptTest extends TestCase
             $html = file_get_contents($report);
             $json = json_decode(file_get_contents($jsonReport), true, flags: \JSON_THROW_ON_ERROR);
             $this->assertSame(1, $json['schema']);
-            $this->assertCount(14, $json['findings']);
+            $this->assertCount(15, $json['findings']);
             $this->assertSame(array_column($json['findings'], 'id'), array_values(array_unique(array_column($json['findings'], 'id'))));
+            $this->assertSame([[
+                'template' => 'child.html.twig',
+                'operations' => ['JavaScriptString'],
+                'current' => 'html',
+            ]], array_values(array_map(static fn (array $finding): array => [
+                'template' => $finding['template'],
+                'operations' => $finding['operations'],
+                'current' => $finding['current'],
+            ], array_filter($json['findings'], static fn (array $finding): bool => 'plan' === ($finding['type'] ?? null) && 'child.html.twig' === ($finding['template'] ?? null)))));
             $this->assertStringContainsString('<input id="search"', $html);
             $this->assertStringContainsString('<strong>1</strong>protected today', $html);
             $this->assertStringContainsString('<strong>3</strong>trust reviews', $html);
-            $this->assertStringContainsString('<strong>8</strong>unsafe today', $html);
+            $this->assertStringContainsString('<strong>9</strong>unsafe today', $html);
             $this->assertStringContainsString('<strong>7</strong>pipelines unavailable', $html);
-            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">9</span>', $html);
+            $this->assertStringContainsString('data-view="action" aria-pressed="true">Action now <span class="view-count">10</span>', $html);
             $this->assertStringContainsString('data-view="review" aria-pressed="false">Review trust contracts <span class="view-count">3</span>', $html);
             $this->assertStringContainsString('data-view="future" aria-pressed="false">Future Twig support <span class="view-count">7</span>', $html);
-            $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">4</span>', $html);
+            $this->assertStringContainsString('data-view="no-urgent" aria-pressed="false">No urgent action <span class="view-count">5</span>', $html);
             $this->assertStringContainsString('data-summary-status="unsafe"', $html);
-            $this->assertStringContainsString('<option value="application">Application (15)</option>', $html);
+            $this->assertStringContainsString('<option value="application">Application (17)</option>', $html);
             $this->assertStringContainsString('<option value="dependency">Dependencies (1)</option>', $html);
             $this->assertStringContainsString('data-assessments="unsafe url-trust unavailable"', $html);
             $this->assertStringContainsString('data-assessments="review"', $html);
@@ -136,14 +147,14 @@ final class LinterScriptTest extends TestCase
 
             [$status, $output] = $this->runScript($projectDirectory, $baseline);
             $this->assertSame(0, $status);
-            $this->assertSame('Baseline diff: 0 new, 0 resolved, 14 unchanged.', $output[array_key_last($output)]);
+            $this->assertSame('Baseline diff: 0 new, 0 resolved, 15 unchanged.', $output[array_key_last($output)]);
 
             $contents = json_decode(file_get_contents($baseline), true, flags: \JSON_THROW_ON_ERROR);
             $contents['findings'][] = ['id' => str_repeat('f', 64), 'type' => 'diagnostic'];
             file_put_contents($baseline, json_encode($contents, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR)."\n");
             [$status, $output] = $this->runScript($projectDirectory, $baseline);
             $this->assertSame(0, $status);
-            $this->assertSame('Baseline diff: 0 new, 1 resolved, 14 unchanged.', $output[array_key_last($output)]);
+            $this->assertSame('Baseline diff: 0 new, 1 resolved, 15 unchanged.', $output[array_key_last($output)]);
 
             copy($jsonReport, $baseline);
             $contents = json_decode(file_get_contents($baseline), true, flags: \JSON_THROW_ON_ERROR);
@@ -152,7 +163,7 @@ final class LinterScriptTest extends TestCase
 
             [$status, $output] = $this->runScript($projectDirectory, $baseline);
             $this->assertSame(1, $status);
-            $this->assertSame('Baseline diff: 1 new, 0 resolved, 13 unchanged.', $output[array_key_last($output)]);
+            $this->assertSame('Baseline diff: 1 new, 0 resolved, 14 unchanged.', $output[array_key_last($output)]);
         } finally {
             foreach ([$report, $jsonReport, $baseline] as $path) {
                 if (is_file($path)) {

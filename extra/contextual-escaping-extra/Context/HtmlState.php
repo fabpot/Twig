@@ -18,6 +18,8 @@ namespace Twig\Extra\ContextualEscaping\Context;
  */
 enum HtmlState
 {
+    case JavaScriptDocument;
+    case CssDocument;
     case Text;
     case TagOpen;
     case EndTagOpen;

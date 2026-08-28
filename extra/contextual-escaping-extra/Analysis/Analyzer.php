@@ -12,6 +12,7 @@
 namespace Twig\Extra\ContextualEscaping\Analysis;
 
 use Twig\Extra\ContextualEscaping\Context\CssState;
+use Twig\Extra\ContextualEscaping\Context\DocumentType;
 use Twig\Extra\ContextualEscaping\Context\HtmlContext;
 use Twig\Extra\ContextualEscaping\Context\HtmlContextParser;
 use Twig\Extra\ContextualEscaping\Context\HtmlState;
@@ -71,6 +72,7 @@ use Twig\TwigFunction;
 final class Analyzer
 {
     private AnalysisResult $result;
+    private DocumentType $documentType;
 
     /** @var array<string, true> */
     private array $diagnosticKeys = [];
@@ -138,9 +140,11 @@ final class Analyzer
         $this->staticValues = [];
         $this->alternativeInferenceFrames = [];
 
-        $context = $this->analyzeModule($module, new HtmlContext(), $module, str_ends_with($module->getTemplateName() ?? '', '.html.twig'));
+        $rootDocumentType = DocumentType::fromTemplateName($module->getTemplateName());
+        $this->documentType = $rootDocumentType ?? DocumentType::Html;
+        $context = $this->analyzeModule($module, $this->createDocumentContext(), $module, $rootDocumentType);
 
-        if (HtmlState::Text !== $context->getState() && HtmlState::Dead !== $context->getState()) {
+        if (DocumentType::Html === $this->documentType && HtmlState::Text !== $context->getState() && HtmlState::Dead !== $context->getState()) {
             $line = $module->getSourceContext() ? 1 + substr_count($module->getSourceContext()->getCode(), "\n") : $module->getTemplateLine();
             $this->result->addDiagnostic(new Diagnostic(
                 DiagnosticCode::IncompleteHtmlContext,
@@ -153,9 +157,18 @@ final class Analyzer
         return $this->result;
     }
 
-    private function analyzeModule(ModuleNode $module, HtmlContext $context, Node $origin, bool $htmlParentAlternativesOnly = false): HtmlContext
+    private function createDocumentContext(): HtmlContext
     {
-        $scopes = $this->createCompositionScopes($module, $htmlParentAlternativesOnly);
+        return match ($this->documentType) {
+            DocumentType::Html => HtmlContext::forHtmlDocument(),
+            DocumentType::JavaScript => HtmlContext::forJavaScriptDocument(),
+            DocumentType::Css => HtmlContext::forCssDocument(),
+        };
+    }
+
+    private function analyzeModule(ModuleNode $module, HtmlContext $context, Node $origin, ?DocumentType $parentDocumentType = null): HtmlContext
+    {
+        $scopes = $this->createCompositionScopes($module, $parentDocumentType);
         if (null === $scopes) {
             return $context->toDead();
         }
@@ -251,9 +264,9 @@ final class Analyzer
      *     imports: array<string, ModuleNode>
      * }>|null
      */
-    private function createCompositionScopes(ModuleNode $module, bool $htmlParentAlternativesOnly = false): ?array
+    private function createCompositionScopes(ModuleNode $module, ?DocumentType $parentDocumentType = null): ?array
     {
-        $moduleChains = $this->collectInheritanceChains($module, [], [], $module, $htmlParentAlternativesOnly);
+        $moduleChains = $this->collectInheritanceChains($module, [], [], $module, $parentDocumentType);
         if (null === $moduleChains) {
             return null;
         }
@@ -275,7 +288,7 @@ final class Analyzer
      *
      * @return list<list<ModuleNode>>|null
      */
-    private function collectInheritanceChains(ModuleNode $current, array $modules, array $seen, ModuleNode $origin, bool $htmlParentAlternativesOnly): ?array
+    private function collectInheritanceChains(ModuleNode $current, array $modules, array $seen, ModuleNode $origin, ?DocumentType $parentDocumentType): ?array
     {
         $id = spl_object_id($current);
         if (isset($seen[$id])) {
@@ -294,14 +307,14 @@ final class Analyzer
             return [$modules];
         }
 
-        $parents = $this->resolveParentTemplateExpressions($current->getNode('parent'), $current, $htmlParentAlternativesOnly);
+        $parents = $this->resolveParentTemplateExpressions($current->getNode('parent'), $current, $parentDocumentType);
         if (null === $parents) {
             return null;
         }
 
         $chains = [];
         foreach ($parents as $parent) {
-            $parentChains = $this->collectInheritanceChains($parent, $modules, $seen, $origin, $htmlParentAlternativesOnly);
+            $parentChains = $this->collectInheritanceChains($parent, $modules, $seen, $origin, $parentDocumentType);
             if (null === $parentChains) {
                 return null;
             }
@@ -401,7 +414,7 @@ final class Analyzer
     /**
      * @return list<ModuleNode>|null
      */
-    private function resolveParentTemplateExpressions(Node $expression, Node $origin, bool $htmlParentAlternativesOnly): ?array
+    private function resolveParentTemplateExpressions(Node $expression, Node $origin, ?DocumentType $parentDocumentType): ?array
     {
         $names = null;
         if ($expression instanceof ConstantExpression && \is_string($expression->getAttribute('value'))) {
@@ -423,7 +436,7 @@ final class Analyzer
 
                 return null;
             }
-            if ($htmlParentAlternativesOnly && preg_match('/\.[^.\/]+\.twig$/D', $name) && !str_ends_with($name, '.html.twig')) {
+            if (null !== $parentDocumentType && preg_match('/\.[^.\/]+\.twig$/D', $name) && $parentDocumentType !== DocumentType::fromTemplateName($name)) {
                 continue;
             }
             if (isset($seen[$name])) {
@@ -832,7 +845,7 @@ final class Analyzer
                 continue;
             }
             $key = VariableKey::fromContextName($name);
-            $valueContentTypes = $this->inferContentTypes($pair['value'], new HtmlContext());
+            $valueContentTypes = $this->inferContentTypes($pair['value'], $this->createDocumentContext());
             if (!$valueContentTypes->isPlainText()) {
                 $contentTypes[$key] = $valueContentTypes;
             }
@@ -1088,8 +1101,8 @@ final class Analyzer
         }
 
         if ($this->isDirectCompositionExpression($expression)) {
-            $output = $this->analyzeCompositionExpression($expression, new HtmlContext(), $expression);
-            if (HtmlState::Dead === $output->getState()) {
+            $output = $this->analyzeCompositionExpression($expression, $this->createDocumentContext(), $expression);
+            if (HtmlState::Dead === $output->getState() || DocumentType::Html !== $this->documentType) {
                 return new ContentTypeSet([ContentType::PlainText]);
             }
             if (HtmlState::Text !== $output->getState()) {
@@ -1331,7 +1344,7 @@ final class Analyzer
             $name = $name->getAttribute('value');
             $key = VariableKey::fromContextName($name);
             $this->contentTypes = $inputContentTypes;
-            $valueContentTypes = $this->inferContentTypes($value, new HtmlContext());
+            $valueContentTypes = $this->inferContentTypes($value, $this->createDocumentContext());
             if ($valueContentTypes->isPlainText()) {
                 unset($outputContentTypes[$key]);
             } else {
@@ -1371,9 +1384,9 @@ final class Analyzer
         $this->assignStaticValues($names, $finiteValues);
 
         if ($node->getAttribute('safe')) {
-            $contentTypes = new ContentTypeSet([ContentType::Html]);
-            if ($values instanceof ConstantExpression && \is_string($values->getAttribute('value'))) {
-                $output = $this->contextParser->consume(new HtmlContext(), $values->getAttribute('value'));
+            $contentTypes = new ContentTypeSet([DocumentType::Html === $this->documentType ? ContentType::Html : ContentType::PlainText]);
+            if (DocumentType::Html === $this->documentType && $values instanceof ConstantExpression && \is_string($values->getAttribute('value'))) {
+                $output = $this->contextParser->consume($this->createDocumentContext(), $values->getAttribute('value'));
                 if (HtmlState::Text !== $output->getState()) {
                     $this->addDiagnostic($node, DiagnosticCode::IncompleteStructuredOutput, \sprintf('The captured output ends in %s instead of HTML text.', $output->describe()));
                     $contentTypes = new ContentTypeSet([ContentType::PlainText]);
@@ -1386,7 +1399,7 @@ final class Analyzer
 
         $valueContentTypes = [];
         foreach ($values as $value) {
-            $valueContentTypes[] = $value instanceof AbstractExpression ? $this->inferContentTypes($value, new HtmlContext()) : new ContentTypeSet([ContentType::PlainText]);
+            $valueContentTypes[] = $value instanceof AbstractExpression ? $this->inferContentTypes($value, $this->createDocumentContext()) : new ContentTypeSet([ContentType::PlainText]);
         }
         $this->assignContentTypes($names, $valueContentTypes);
 
@@ -1395,8 +1408,8 @@ final class Analyzer
 
     private function analyzeCapturedContent(CaptureNode $capture, string|bool|null $explicitAutoescape): ContentTypeSet
     {
-        $output = $this->analyzeNode($capture->getNode('body'), new HtmlContext(), $explicitAutoescape);
-        if (HtmlState::Dead === $output->getState()) {
+        $output = $this->analyzeNode($capture->getNode('body'), $this->createDocumentContext(), $explicitAutoescape);
+        if (HtmlState::Dead === $output->getState() || DocumentType::Html !== $this->documentType) {
             return new ContentTypeSet([ContentType::PlainText]);
         }
         if (HtmlState::Text !== $output->getState()) {
@@ -1582,7 +1595,7 @@ final class Analyzer
 
     private function contextAfterUnsupportedPrint(HtmlContext $context): HtmlContext
     {
-        if ($context->getState()->isScriptData()) {
+        if (HtmlState::JavaScriptDocument === $context->getState() || HtmlState::CssDocument === $context->getState() || $context->getState()->isScriptData()) {
             return $context;
         }
 

@@ -188,6 +188,22 @@ class ContentTypeLinterTest extends AbstractLinterTestCase
         ];
     }
 
+    public function testStandaloneJavaScriptCaptureRemainsPlainText(): void
+    {
+        $result = $this->lint('{% set content %}const child = "{{ value }}";{% endset %}const output = {{ content }};', 'index.js.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::JavaScriptString], [EscapeOperation::JavaScriptValue]], $this->getPlans($result));
+    }
+
+    public function testStandaloneCssCaptureRemainsPlainText(): void
+    {
+        $result = $this->lint('{% set content %}.child { color: {{ value }}; }{% endset %}.parent { color: {{ content }}; }', 'index.css.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::CssValue], [EscapeOperation::CssValue]], $this->getPlans($result));
+    }
+
     /**
      * @param list<list<EscapeOperation>> $expectedPlans
      *

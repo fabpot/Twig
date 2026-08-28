@@ -26,13 +26,27 @@ use Twig\TwigFunction;
 
 class LinterTest extends AbstractLinterTestCase
 {
-    public function testSkipsNonHtmlTemplatesByDefault(): void
+    public function testSkipsUnsupportedTemplatesByDefault(): void
     {
-        $result = $this->lint('{{ value }}', 'index.js.twig');
+        foreach (['index.txt.twig', 'index.json.twig'] as $name) {
+            $result = $this->lint('{{ value }}', $name);
 
-        $this->assertTrue($result->isSkipped());
-        $this->assertSame([], $result->getDiagnostics());
-        $this->assertSame([], $result->getInferredEscapes());
+            $this->assertTrue($result->isSkipped());
+            $this->assertSame([], $result->getDiagnostics());
+            $this->assertSame([], $result->getInferredEscapes());
+        }
+    }
+
+    public function testLintsStandaloneJavaScriptAndCssTemplatesByDefault(): void
+    {
+        $environment = new Environment(new ArrayLoader([
+            'index.js.twig' => 'const value = "{{ value }}";',
+            'index.css.twig' => '.notice { content: "{{ value }}"; }',
+        ]), ['optimizations' => 0]);
+        $linter = Linter::create($environment);
+
+        $this->assertSame([[EscapeOperation::JavaScriptString]], $this->getPlans($linter->lintTemplate('index.js.twig')));
+        $this->assertSame([[EscapeOperation::CssString]], $this->getPlans($linter->lintTemplate('index.css.twig')));
     }
 
     public function testCanForceAnalysisOfANonHtmlTemplate(): void
@@ -75,10 +89,14 @@ class LinterTest extends AbstractLinterTestCase
         $this->assertSame([
             'deprecated.html.twig',
             'first.html.twig',
+            'ignored.css.twig',
+            'ignored.js.twig',
             'nested/second.html.twig',
             'syntax-error.html.twig',
         ], array_keys($results));
         $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($results['first.html.twig']));
+        $this->assertSame([[EscapeOperation::CssValue]], $this->getPlans($results['ignored.css.twig']));
+        $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($results['ignored.js.twig']));
         $this->assertSame([
             [EscapeOperation::UrlPath, EscapeOperation::HtmlAttribute],
             [EscapeOperation::HtmlText],
@@ -98,10 +116,20 @@ class LinterTest extends AbstractLinterTestCase
         $results = iterator_to_array(Linter::create($environment)->lintDirectory($directory, 'scripts', '.js.twig'));
 
         $this->assertSame(['@scripts/ignored.js.twig'], array_keys($results));
-        $this->assertSame([[EscapeOperation::HtmlText]], $this->getPlans($results['@scripts/ignored.js.twig']));
+        $this->assertSame([[EscapeOperation::JavaScriptValue]], $this->getPlans($results['@scripts/ignored.js.twig']));
         $inferredEscape = $results['@scripts/ignored.js.twig']->getInferredEscapes()[0];
         $this->assertSame('@scripts/ignored.js.twig', $inferredEscape->getNode()->getTemplateName());
-        $this->assertSame('HTML text', $inferredEscape->getContext());
+        $this->assertSame('JavaScript Code', $inferredEscape->getContext());
+    }
+
+    public function testCanLintADirectoryWithCustomExtensions(): void
+    {
+        $directory = __DIR__.'/Fixtures/directory';
+        $environment = new Environment(new FilesystemLoader($directory), ['optimizations' => 0]);
+
+        $results = iterator_to_array(Linter::create($environment)->lintDirectory($directory, extension: ['.js.twig', '.css.twig']));
+
+        $this->assertSame(['ignored.css.twig', 'ignored.js.twig'], array_keys($results));
     }
 
     public function testRejectsANonexistentLintDirectory(): void

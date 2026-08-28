@@ -151,6 +151,22 @@ class CssContextLinterTest extends AbstractLinterTestCase
         ];
     }
 
+    public function testStandaloneCssPreservesContextAfterUnsupportedOutput(): void
+    {
+        $result = $this->lint('{{ first }}; .notice { color: {{ second }}; }', 'index.css.twig');
+
+        $this->assertSame([DiagnosticCode::UnsupportedOutputContext], $this->getDiagnosticCodes($result));
+        $this->assertSame([[EscapeOperation::CssValue]], $this->getPlans($result));
+    }
+
+    public function testStandaloneCssDoesNotRequireACompleteSyntaxState(): void
+    {
+        $result = $this->lint('.notice { content: "{{ value }}', 'index.css.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::CssString]], $this->getPlans($result));
+    }
+
     /**
      * @dataProvider provideStructuralCssContexts
      */

@@ -50,8 +50,30 @@ final class HtmlContextParser
     public function consume(HtmlContext $context, string $text): HtmlContext
     {
         $length = \strlen($text);
-        $offset = 0;
+        if (HtmlState::JavaScriptDocument === $context->getState()) {
+            $javaScriptContext = $context->getJavaScriptContext();
+            if (null === $javaScriptContext) {
+                return $context->toDead();
+            }
+            for ($offset = 0; $offset < $length; ++$offset) {
+                $javaScriptContext = $this->javaScriptContextParser->consume($javaScriptContext, $text[$offset]);
+            }
 
+            return $context->withJavaScriptContext($javaScriptContext);
+        }
+        if (HtmlState::CssDocument === $context->getState()) {
+            $cssContext = $context->getCssContext();
+            if (null === $cssContext) {
+                return $context->toDead();
+            }
+            for ($offset = 0; $offset < $length; ++$offset) {
+                $cssContext = $this->cssContextParser->consume($cssContext, $text[$offset]);
+            }
+
+            return $context->withCssContext($cssContext);
+        }
+
+        $offset = 0;
         while ($offset < $length) {
             if (HtmlState::Dead === $context->getState() || $context->hasMetaRefreshConflict()) {
                 return $context;
@@ -63,6 +85,9 @@ final class HtmlContextParser
             $cssContext = $this->isCssRawTextState($context->getState()) ? $context->getCssContext() : null;
 
             switch ($context->getState()) {
+                case HtmlState::JavaScriptDocument:
+                case HtmlState::CssDocument:
+                    throw new \LogicException('Document root states must be handled before HTML tokenization.');
                 case HtmlState::Text:
                     if ('<' === $character) {
                         $context = $context->withState(HtmlState::TagOpen);

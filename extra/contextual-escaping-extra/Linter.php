@@ -27,6 +27,7 @@ use Twig\Extra\ContextualEscaping\Analysis\HtmlAttributeMapLoopShapeAnalyzer;
 use Twig\Extra\ContextualEscaping\Analysis\NodeAnalyzerRegistry;
 use Twig\Extra\ContextualEscaping\Analysis\StaticExpressionAnalyzer;
 use Twig\Extra\ContextualEscaping\Context\CssContextParser;
+use Twig\Extra\ContextualEscaping\Context\DocumentType;
 use Twig\Extra\ContextualEscaping\Context\HtmlContextParser;
 use Twig\Extra\ContextualEscaping\Context\JavaScriptContextParser;
 use Twig\Extra\ContextualEscaping\Context\MetaRefreshContextParser;
@@ -89,12 +90,14 @@ final class Linter
     }
 
     /**
+     * @param string|list<string> $extension
+     *
      * @return \Generator<string, AnalysisResult>
      *
      * @throws \InvalidArgumentException When the path is not a directory
      * @throws \RuntimeException         When a template cannot be read
      */
-    public function lintDirectory(string $directory, ?string $namespace = null, string $extension = '.html.twig'): \Generator
+    public function lintDirectory(string $directory, ?string $namespace = null, string|array $extension = ['.html.twig', '.js.twig', '.css.twig']): \Generator
     {
         $requestedDirectory = $directory;
         if (false === $directory = realpath($directory)) {
@@ -104,11 +107,18 @@ final class Linter
             throw new \InvalidArgumentException(\sprintf('The "%s" path is not a directory.', $requestedDirectory));
         }
 
+        $extensions = (array) $extension;
         $paths = [];
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($directory, \FilesystemIterator::SKIP_DOTS));
         foreach ($iterator as $file) {
-            if ($file->isFile() && str_ends_with($file->getFilename(), $extension)) {
-                $paths[] = $file->getPathname();
+            if (!$file->isFile()) {
+                continue;
+            }
+            foreach ($extensions as $suffix) {
+                if (str_ends_with($file->getFilename(), $suffix)) {
+                    $paths[] = $file->getPathname();
+                    break;
+                }
             }
         }
         sort($paths, \SORT_STRING);
@@ -143,7 +153,7 @@ final class Linter
      */
     public function lint(Source $source, bool $force = false): AnalysisResult
     {
-        if (!$force && !str_ends_with($source->getName(), '.html.twig')) {
+        if (!$force && null === DocumentType::fromTemplateName($source->getName())) {
             return new AnalysisResult(true);
         }
 

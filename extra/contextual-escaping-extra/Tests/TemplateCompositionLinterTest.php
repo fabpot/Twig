@@ -135,6 +135,24 @@ class TemplateCompositionLinterTest extends AbstractLinterTestCase
             'index.html.twig',
             [[EscapeOperation::JavaScriptString], [EscapeOperation::HtmlAttribute]],
         ];
+        yield 'standalone JavaScript inheritance ignores other document types' => [
+            [
+                'base.js.twig' => 'const value = "{% block content %}{% endblock %}";',
+                'base.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'index.js.twig' => '{% extends javascript ? "base.js.twig" : "base.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.js.twig',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone CSS inheritance ignores other document types' => [
+            [
+                'base.css.twig' => '.notice { color: {% block content %}{% endblock %}; }',
+                'base.html.twig' => '<div title="{% block content %}{% endblock %}">',
+                'index.css.twig' => '{% extends css ? "base.css.twig" : "base.html.twig" %}{% block content %}{{ value }}{% endblock %}',
+            ],
+            'index.css.twig',
+            [[EscapeOperation::CssValue]],
+        ];
         yield 'parent block' => [
             [
                 'base.html.twig' => '{% block content %}{{ parent_value }}{% endblock %}',
@@ -193,6 +211,38 @@ class TemplateCompositionLinterTest extends AbstractLinterTestCase
             'index.html.twig',
             [[EscapeOperation::JavaScriptValue]],
         ];
+        yield 'standalone JavaScript include function' => [
+            [
+                'parent.js.twig' => 'const value = "{{ include("child.html.twig") }}";',
+                'child.html.twig' => '{{ value }}',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone JavaScript include tag ignores the included template name' => [
+            [
+                'parent.js.twig' => 'const value = "{% include "child.css.twig" %}";',
+                'child.css.twig' => '{{ value }}',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString]],
+        ];
+        yield 'standalone CSS include function' => [
+            [
+                'parent.css.twig' => '.notice { content: "{{ include("child.html.twig") }}"; }',
+                'child.html.twig' => '{{ value }}',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssString]],
+        ];
+        yield 'standalone CSS include tag ignores the included template name' => [
+            [
+                'parent.css.twig' => '.notice { content: "{% include "child.js.twig" %}"; }',
+                'child.js.twig' => '{{ value }}',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssString]],
+        ];
         yield 'include function' => [
             [
                 'index.html.twig' => '{{ include("partial.html.twig") }}',
@@ -208,6 +258,22 @@ class TemplateCompositionLinterTest extends AbstractLinterTestCase
             ],
             'index.html.twig',
             [[EscapeOperation::HtmlText], [EscapeOperation::HtmlText]],
+        ];
+        yield 'transformed standalone JavaScript include remains plain text' => [
+            [
+                'parent.js.twig' => 'const output = {{ include("child.js.twig")|upper }};',
+                'child.js.twig' => 'const child = "{{ value }}";',
+            ],
+            'parent.js.twig',
+            [[EscapeOperation::JavaScriptString], [EscapeOperation::JavaScriptValue]],
+        ];
+        yield 'transformed standalone CSS include remains plain text' => [
+            [
+                'parent.css.twig' => '.parent { color: {{ include("child.css.twig")|upper }}; }',
+                'child.css.twig' => '.child { color: {{ value }}; }',
+            ],
+            'parent.css.twig',
+            [[EscapeOperation::CssValue], [EscapeOperation::CssValue]],
         ];
         yield 'trusted include function' => [
             [

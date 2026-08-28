@@ -127,6 +127,30 @@ class JavaScriptContextLinterTest extends AbstractLinterTestCase
         ];
     }
 
+    public function testStandaloneJavaScriptBypassesHtmlTokenization(): void
+    {
+        $result = $this->lint('const value = "</script>{{ value }}";', 'index.js.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::JavaScriptString]], $this->getPlans($result));
+    }
+
+    public function testStandaloneJavaScriptPreservesContextAfterUnsupportedOutput(): void
+    {
+        $result = $this->lint('identifier{{ first }}; const value = "{{ second }}";', 'index.js.twig');
+
+        $this->assertSame([DiagnosticCode::AmbiguousJavaScriptContext], $this->getDiagnosticCodes($result));
+        $this->assertSame([[EscapeOperation::JavaScriptString]], $this->getPlans($result));
+    }
+
+    public function testStandaloneJavaScriptDoesNotRequireACompleteSyntaxState(): void
+    {
+        $result = $this->lint('const value = "{{ value }}', 'index.js.twig');
+
+        $this->assertSame([], $result->getDiagnostics());
+        $this->assertSame([[EscapeOperation::JavaScriptString]], $this->getPlans($result));
+    }
+
     public function testUsesDeclaredJavaScriptTypes(): void
     {
         $environment = new Environment(new ArrayLoader(), ['optimizations' => 0]);

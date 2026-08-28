@@ -37,10 +37,10 @@ final class EscapePlanInferer
 
             return new EscapePlanInference(DiagnosticCode::UnsupportedOutputContext, \sprintf('An HTML attribute list cannot be rendered in %s.', $context->describe()));
         }
-        if ($context->getState()->isScriptData()) {
+        if (HtmlState::JavaScriptDocument === $context->getState() || $context->getState()->isScriptData()) {
             return $this->inferJavaScriptPlan($context, $contentTypes, false);
         }
-        if (HtmlState::RawText === $context->getState() && null !== $context->getCssContext()) {
+        if (HtmlState::CssDocument === $context->getState() || (HtmlState::RawText === $context->getState() && null !== $context->getCssContext())) {
             return $this->inferCssPlan($context, $contentTypes, false);
         }
 
