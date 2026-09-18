@@ -92,6 +92,20 @@ final class EscaperRuntime implements RuntimeExtensionInterface
     /**
      * @param string[] $strategies
      */
+    private static function isSafeFor(string $strategy, array $strategies): bool
+    {
+        foreach ($strategies as $declared) {
+            if ('all' === $declared || $strategy === $declared || \in_array($strategy, self::IMPLIED_STRATEGIES[$declared] ?? [], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param string[] $strategies
+     */
     private function addSafeLookup(string $class, array $strategies): void
     {
         foreach ($strategies as $strategy) {
@@ -116,7 +130,13 @@ final class EscaperRuntime implements RuntimeExtensionInterface
     public function escape($string, string $strategy = 'html', ?string $charset = null, bool $autoescape = false)
     {
         if ($autoescape && $string instanceof Markup) {
-            return $string;
+            $safeStrategies = $string->getSafeStrategies();
+            if (['all'] === $safeStrategies || self::isSafeFor($strategy, $safeStrategies)) {
+                return $string;
+            }
+
+            // the strategies carried by the instance are authoritative
+            $string = (string) $string;
         }
 
         if (!\is_string($string)) {

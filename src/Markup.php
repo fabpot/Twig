@@ -31,8 +31,14 @@ class Markup implements \Countable, \JsonSerializable, \Stringable
     private $content;
     private ?string $charset;
 
-    public function __construct($content, $charset)
-    {
+    /**
+     * @param string[] $safeStrategies The escaping strategies the content is safe for, `['all']` for all of them
+     */
+    public function __construct(
+        $content,
+        $charset,
+        private array $safeStrategies = ['all'],
+    ) {
         $this->content = (string) $content;
         $this->charset = $charset;
     }
@@ -45,6 +51,14 @@ class Markup implements \Countable, \JsonSerializable, \Stringable
     public function getCharset(): string
     {
         return $this->charset;
+    }
+
+    /**
+     * @return string[]
+     */
+    public function getSafeStrategies(): array
+    {
+        return $this->safeStrategies;
     }
 
     /**
