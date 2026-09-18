@@ -22,6 +22,7 @@ use Twig\Node\Expression\ConstantExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\OperatorEscapeInterface;
 use Twig\Node\ImportNode;
+use Twig\Node\MacroNode;
 use Twig\Node\ModuleNode;
 use Twig\Node\Node;
 use Twig\Node\Nodes;
@@ -64,7 +65,7 @@ final class EscaperNodeVisitor implements NodeVisitorInterface
             $this->statusStack[] = $this->blocks[$node->getAttribute('name')] ?? $this->needEscaping();
         } elseif ($node instanceof ImportNode) {
             $this->safeVars[] = $node->getNode('var')->getNode('var')->getAttribute('name');
-        } elseif ($node instanceof CaptureNode || ($node instanceof SetNode && $node->getAttribute('safe'))) {
+        } elseif ($node instanceof CaptureNode || $node instanceof MacroNode || ($node instanceof SetNode && $node->getAttribute('safe'))) {
             // captured content is only proven safe for the strategy it was captured under;
             // the legacy "{% autoescape true %}" strategy names no escaper, so it proves nothing
             $node->setAttribute('strategy', \is_string($strategy = $this->needEscaping()) ? $strategy : false);

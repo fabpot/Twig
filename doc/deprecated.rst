@@ -320,13 +320,15 @@ Templates
   deprecated as of Twig 3.28 and will throw in Twig 4.0. These tags have a
   global effect on the template and must be declared at the root of its body.
 
-* Printing content captured under an escaping strategy (via ``{% set %}``) in a
-  context that its escaping does not cover is deprecated as of Twig 3.30; such
-  content will be escaped in Twig 4.0. Content captured in an HTML context is
-  escaped for HTML only, so printing it in a JavaScript, CSS, or URL context is
-  unsafe; the reverse is fine, as those strategies escape everything HTML needs.
-  Capture the content in the context where it is printed, or mark it as safe
-  explicitly with ``new \Twig\Markup($content, $charset, ['js'])``.
+* Printing content produced under an escaping strategy in a context that its
+  escaping does not cover is deprecated as of Twig 3.30; such content will be
+  escaped in Twig 4.0. This covers content captured with ``{% set %}``, the
+  result of a macro, and the result of the ``include()``, ``include_only()``, and
+  ``source()`` functions. Content produced in an HTML context is escaped for HTML
+  only, so printing it in a JavaScript, CSS, or URL context is unsafe; the
+  reverse is fine, as those strategies escape everything HTML needs. Produce the
+  content in the context where it is printed, or mark it as safe explicitly with
+  ``new \Twig\Markup($content, $charset, ['js'])``.
 
 Macros
 ------
