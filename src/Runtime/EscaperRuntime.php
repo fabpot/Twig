@@ -27,6 +27,24 @@ final class EscaperRuntime implements RuntimeExtensionInterface
         'html_attr_relaxed' => ['html'],
     ];
 
+    private const BUILT_IN_STRATEGIES = ['html', 'js', 'css', 'html_attr', 'html_attr_relaxed', 'url'];
+
+    /**
+     * Contexts a strategy escapes enough characters for, beyond its own.
+     *
+     * This only holds for content Twig escaped itself; a value someone declares safe for a
+     * strategy says nothing about the characters it contains. EscaperStrategyCoverageTest
+     * checks this table against the escapers.
+     */
+    private const STRATEGY_COVERAGE = [
+        'html' => [],
+        'html_attr' => ['html', 'html_attr_relaxed', 'js'],
+        'html_attr_relaxed' => ['html', 'html_attr', 'js'],
+        'js' => ['html', 'html_attr', 'html_attr_relaxed', 'url'],
+        'css' => ['html'],
+        'url' => ['html', 'html_attr', 'html_attr_relaxed', 'js', 'css'],
+    ];
+
     /** @var array<string, callable(string, string): string> */
     private $escapers = [];
 
@@ -106,6 +124,20 @@ final class EscaperRuntime implements RuntimeExtensionInterface
     /**
      * @param string[] $strategies
      */
+    private static function isCoveredBy(string $strategy, array $strategies): bool
+    {
+        foreach ($strategies as $used) {
+            if (\in_array($strategy, self::STRATEGY_COVERAGE[$used] ?? [], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param string[] $strategies
+     */
     private function addSafeLookup(string $class, array $strategies): void
     {
         foreach ($strategies as $strategy) {
@@ -131,7 +163,21 @@ final class EscaperRuntime implements RuntimeExtensionInterface
     {
         if ($autoescape && $string instanceof Markup) {
             $safeStrategies = $string->getSafeStrategies();
-            if (['all'] === $safeStrategies || self::isSafeFor($strategy, $safeStrategies)) {
+            if ([$strategy] === $safeStrategies || ['all'] === $safeStrategies || self::isSafeFor($strategy, $safeStrategies)) {
+                return $string;
+            }
+
+            if ($string->isProducedByTwig()) {
+                if (self::isCoveredBy($strategy, $safeStrategies)) {
+                    return $string;
+                }
+
+                // 4.0 cleanup: drop this block, such content is then escaped like any other value;
+                // the legacy "{% autoescape true %}" names no escaper, so there is nothing to warn about
+                if (isset($this->escapers[$strategy]) || \in_array($strategy, self::BUILT_IN_STRATEGIES, true)) {
+                    trigger_deprecation('twig/twig', '3.30', 'Printing content produced with the "%s" escaping strategy in a "%s" context that its escaping does not cover is deprecated; it will be escaped in 4.0.', $safeStrategies[0], $strategy);
+                }
+
                 return $string;
             }
 
@@ -158,7 +204,7 @@ final class EscaperRuntime implements RuntimeExtensionInterface
                 }
 
                 $string = (string) $string;
-            } elseif (\in_array($strategy, ['html', 'js', 'css', 'html_attr', 'html_attr_relaxed', 'url'], true)) {
+            } elseif (\in_array($strategy, self::BUILT_IN_STRATEGIES, true)) {
                 // we return the input as is (which can be of any type)
                 return $string;
             }

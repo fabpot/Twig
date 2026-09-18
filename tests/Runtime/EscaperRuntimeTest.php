@@ -495,6 +495,20 @@ class EscaperRuntimeTest extends TestCase
         $this->assertSame('&lt;br /&gt;', $escaper->escape(new Markup('<br />', 'UTF-8', ['js']), 'html', null, true));
     }
 
+    public function testContentTwigEscapedIsSafeInEveryContextItsStrategyCovers(): void
+    {
+        $markup = Markup::createForStrategy('<br />', 'UTF-8', 'js');
+
+        $this->assertSame($markup, (new EscaperRuntime())->escape($markup, 'html', null, true));
+    }
+
+    public function testDeclaringAValueSafeForAStrategyDoesNotCoverOtherContexts(): void
+    {
+        $markup = new Markup('<br />', 'UTF-8', ['js']);
+
+        $this->assertSame('&lt;br /&gt;', (new EscaperRuntime())->escape($markup, 'html', null, true));
+    }
+
     public function testMarkupIsEscapedWhenTheDeveloperCallsTheEscapeFilter(): void
     {
         $this->assertSame('&lt;br /&gt;', (new EscaperRuntime())->escape(new Markup('<br />', 'UTF-8', ['html']), 'html'));

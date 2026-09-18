@@ -1218,8 +1218,8 @@ final class CoreExtension extends AbstractExtension
             default => throw new RuntimeError('Trimming side must be "left", "right" or "both".'),
         };
 
-        // trimming a safe string with the default character mask keeps it safe for the same strategies
-        return $string instanceof Markup && self::DEFAULT_TRIM_CHARS === $characterMask ? new Markup($trimmed, $string->getCharset(), $string->getSafeStrategies()) : $trimmed;
+        // trimming a safe string with the default character mask keeps it as safe as it was
+        return $string instanceof Markup && self::DEFAULT_TRIM_CHARS === $characterMask ? $string->withContent($trimmed) : $trimmed;
     }
 
     /**

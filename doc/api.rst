@@ -564,6 +564,22 @@ The escaping rules are implemented as follows:
   strategies of the instance always win over the ones registered for its class,
   and an explicit ``|escape('html')`` in a template escapes the value anyway.
 
+* An extension that renders a template and returns its output should mark that
+  output with the strategy the template was compiled with:
+
+  .. code-block:: php
+
+        $template = $twig->load('widget.html.twig');
+
+        return \Twig\Markup::createForStrategy($template->render($context), $twig->getCharset(), $template->getDefaultEscapeStrategy());
+
+  Twig escaped that content itself, so it is also safe in every context the
+  strategy covers: content escaped for JavaScript, CSS or URLs escapes
+  everything HTML needs, so it is safe in HTML too. This is how the ``include()``
+  function marks its result, and it is what declaring a value safe with
+  ``new \Twig\Markup()`` cannot express, as a declaration says nothing about the
+  characters the content contains.
+
 * Escaping is applied before printing, after any other filter is applied:
 
   .. code-block:: twig

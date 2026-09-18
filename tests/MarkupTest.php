@@ -25,4 +25,20 @@ class MarkupTest extends TestCase
     {
         $this->assertSame(['html', 'js'], (new Markup('<br />', 'UTF-8', ['html', 'js']))->getSafeStrategies());
     }
+
+    public function testContentProducedForAStrategyIsSafeForThatStrategy(): void
+    {
+        $markup = Markup::createForStrategy('<br />', 'UTF-8', 'html');
+
+        $this->assertSame(['html'], $markup->getSafeStrategies());
+        $this->assertTrue($markup->isProducedByTwig());
+    }
+
+    public function testContentProducedWithoutAutoescapingIsSafeForAllStrategies(): void
+    {
+        $markup = Markup::createForStrategy('<br />', 'UTF-8', false);
+
+        $this->assertSame(['all'], $markup->getSafeStrategies());
+        $this->assertFalse($markup->isProducedByTwig());
+    }
 }

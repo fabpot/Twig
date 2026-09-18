@@ -3,7 +3,9 @@
  * Fix `IntlExtension` letting the pattern derived from a date formatter prototype override an explicit locale
  * Fix `IntlExtension` not honoring the locale of a date formatter prototype configured with no date and time styles
  * Speed up macro calls
+ * Deprecate printing content captured under an escaping strategy in a context that its escaping does not cover
  * Add a way to mark a `Twig\Markup` instance as safe for some escaping strategies only
+ * Add `Markup::createForStrategy()` for extensions returning the output of a rendered template
  * Consider a safe class declared for `html_attr` also safe for `html_attr_relaxed` and `html`, as the compile-time analysis already does for filters and functions
  * Add `TemplateWrapper::getDefaultEscapeStrategy()` to know the escaping strategy a template was compiled with
  * Report a clear error when `random`, `reverse`, `shuffle`, and `split` receive a string that is not valid UTF-8
