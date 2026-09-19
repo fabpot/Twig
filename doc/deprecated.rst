@@ -327,7 +327,8 @@ Templates
   ``source()`` functions. Content produced in an HTML context is escaped for HTML
   only, so printing it in a JavaScript, CSS, or URL context is unsafe; the
   reverse is fine, as those strategies escape everything HTML needs. Produce the
-  content in the context where it is printed, or mark it as safe explicitly with
+  content in the context where it is printed, print it with the ``raw`` filter
+  when you know it is safe there, or mark it as safe explicitly with
   ``new \Twig\Markup($content, $charset, ['js'])``.
 
 Macros
