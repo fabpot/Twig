@@ -1749,6 +1749,10 @@ final class CoreExtension extends AbstractExtension
         if (Template::METHOD_CALL !== $type) {
             $arrayItem = \is_bool($item) || \is_float($item) ? (int) $item : $item;
 
+            if ($arrayItem instanceof \Stringable && ($object instanceof \ArrayObject || $object instanceof \ArrayIterator)) {
+                $arrayItem = (string) $arrayItem;
+            }
+
             if ($sandboxed && $object instanceof \ArrayAccess && !\in_array($object::class, self::ARRAY_LIKE_CLASSES, true)) {
                 try {
                     $env->getExtension(SandboxExtension::class)->getChecker()->checkPropertyAllowed($object, $arrayItem, $lineno, $source);
@@ -1759,10 +1763,6 @@ final class CoreExtension extends AbstractExtension
                     $item = (string) $item;
                     goto methodCheck;
                 }
-            }
-
-            if ($arrayItem instanceof \Stringable && ($object instanceof \ArrayObject || $object instanceof \ArrayIterator)) {
-                $arrayItem = (string) $arrayItem;
             }
 
             if (match (true) {

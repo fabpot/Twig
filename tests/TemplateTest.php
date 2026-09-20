@@ -356,13 +356,17 @@ class TemplateTest extends TestCase
      * @dataProvider getStringableKeySubclassArrayAccessContainers
      */
     #[DataProvider('getStringableKeySubclassArrayAccessContainers')]
-    public function testStringableKeyIsCoercedForSubclassesOfInternalArrayAccess(bool $strict, \ArrayAccess $data): void
+    public function testStringableKeyIsCoercedForSubclassesOfInternalArrayAccess(bool $strict, bool $sandboxed, \ArrayAccess $data): void
     {
         $twig = new Environment(new ArrayLoader(['index' => '{{ data[key] }}']), [
             'strict_variables' => $strict,
             'autoescape' => false,
         ]);
         $key = new TemplateStringableKey();
+        if ($sandboxed) {
+            // subclasses are not part of CoreExtension::ARRAY_LIKE_CLASSES, so the sandbox checks the key as a property
+            $twig->addExtension(new SandboxExtension(new SecurityPolicy([], [], [$key::class => ['__toString']], [$data::class => ['string']], []), true));
+        }
 
         $this->assertSame('value', $twig->render('index', ['data' => $data, 'key' => $key]));
         $this->assertSame(1, $key->toStringCalls);
@@ -371,8 +375,10 @@ class TemplateTest extends TestCase
     public static function getStringableKeySubclassArrayAccessContainers(): iterable
     {
         foreach (['lax' => false, 'strict' => true] as $mode => $strict) {
-            yield $mode.' ArrayObject subclass' => [$strict, new TemplateArrayObjectSubclass(['string' => 'value'])];
-            yield $mode.' ArrayIterator subclass' => [$strict, new TemplateArrayIteratorSubclass(['string' => 'value'])];
+            foreach (['unsandboxed' => false, 'sandboxed' => true] as $sandboxMode => $sandboxed) {
+                yield $mode.' '.$sandboxMode.' ArrayObject subclass' => [$strict, $sandboxed, new TemplateArrayObjectSubclass(['string' => 'value'])];
+                yield $mode.' '.$sandboxMode.' ArrayIterator subclass' => [$strict, $sandboxed, new TemplateArrayIteratorSubclass(['string' => 'value'])];
+            }
         }
     }
 
