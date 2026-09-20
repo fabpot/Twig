@@ -65,9 +65,8 @@ class Markup implements \Countable, \JsonSerializable, \Stringable
      *
      *     return Markup::createForStrategy($template->render($context), $twig->getCharset(), $template->getDefaultEscapeStrategy());
      *
-     * Such content is also safe in every context that strategy covers: content escaped
-     * for JavaScript, CSS or URLs is safe in HTML, for instance. Until 4.0, it stays
-     * safe everywhere else too, with a deprecation instead of escaping.
+     * Such content is safe in a context using that strategy, and escaped in any other
+     * one. Until 4.0, it stays safe everywhere, with a deprecation instead of escaping.
      *
      * Content produced without autoescaping (a `false` strategy) is safe everywhere, as
      * it always has been.

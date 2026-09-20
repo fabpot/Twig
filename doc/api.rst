@@ -573,12 +573,9 @@ The escaping rules are implemented as follows:
 
         return \Twig\Markup::createForStrategy($template->render($context), $twig->getCharset(), $template->getDefaultEscapeStrategy());
 
-  Twig escaped that content itself, so it is also safe in every context the
-  strategy covers: content escaped for JavaScript, CSS or URLs escapes
-  everything HTML needs, so it is safe in HTML too. This is how the ``include()``
-  function marks its result, and it is what declaring a value safe with
-  ``new \Twig\Markup()`` cannot express, as a declaration says nothing about the
-  characters the content contains.
+  Such content is safe in a context using that strategy, and escaped in any
+  other one: content escaped for JavaScript is not safe in a CSS context. This
+  is how the ``include()`` function marks its result.
 
 * Escaping is applied before printing, after any other filter is applied:
 
