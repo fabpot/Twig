@@ -2,8 +2,15 @@
 Content produced under another escaping strategy is reported once per call site
 --DEPRECATION--
 Since twig/twig 3.30: Printing content produced with the "html" escaping strategy in a "js" context is deprecated in "index.twig" at line 4; it will be escaped in 4.0.
+Since twig/twig 3.30: Printing content produced with the "html" escaping strategy in a "js" context is deprecated in "other.twig" at line 4; it will be escaped in 4.0.
 --TEMPLATE--
 {%- set captured %}<b>{{ value }}</b>{% endset %}
+{%- autoescape 'js' %}
+{%- for i in 1..3 %}{{ captured }}{% endfor %}
+{%- endautoescape %}
+{{- include('other.twig') }}
+--TEMPLATE(other.twig)--
+{%- set captured %}<i>{{ value }}</i>{% endset %}
 {%- autoescape 'js' %}
 {%- for i in 1..3 %}{{ captured }}{% endfor %}
 {%- endautoescape %}
@@ -12,4 +19,4 @@ return ['value' => 'x']
 --CONFIG--
 return ['autoescape' => 'html']
 --EXPECT--
-<b>x</b><b>x</b><b>x</b>
+<b>x</b><b>x</b><b>x</b><i>x</i><i>x</i><i>x</i>

@@ -396,14 +396,18 @@ final class EscaperRuntime implements RuntimeExtensionInterface
         // the compiled template that called escape() is two frames up
         $traces = debug_backtrace(\DEBUG_BACKTRACE_IGNORE_ARGS | \DEBUG_BACKTRACE_PROVIDE_OBJECT, 3);
         $call = $traces[1] ?? [];
+        $template = $traces[2]['object'] ?? null;
 
-        $callSite = $produced."\0".$strategy."\0".($call['file'] ?? '')."\0".($call['line'] ?? '');
+        // templates compiled without a cache share the same eval()'d file, so the class tells them apart
+        $source = $template instanceof Template ? $template::class : ($call['file'] ?? '');
+
+        $callSite = $produced."\0".$strategy."\0".$source."\0".($call['line'] ?? '');
         if (isset($this->reportedStrategyMismatches[$callSite])) {
             return;
         }
         $this->reportedStrategyMismatches[$callSite] = true;
 
-        if (!$location = $this->guessTemplateLocation($traces[2]['object'] ?? null, $call)) {
+        if (!$location = $this->guessTemplateLocation($template, $call)) {
             trigger_deprecation('twig/twig', '3.30', 'Printing content produced with the "%s" escaping strategy in a "%s" context is deprecated; it will be escaped in 4.0.', $produced, $strategy);
 
             return;
