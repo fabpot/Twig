@@ -323,12 +323,12 @@ Templates
 * Printing content produced under an escaping strategy in a context that its
   escaping does not cover is deprecated as of Twig 3.30; such content will be
   escaped in Twig 4.0. This covers content captured with ``{% set %}``, the
-  result of a macro, and the result of the ``include()``, ``include_only()``, and
-  ``source()`` functions. Content produced in an HTML context is escaped for HTML
-  only, so printing it in a JavaScript, CSS, or URL context is unsafe; the
-  reverse is fine, as those strategies escape everything HTML needs. Produce the
-  content in the context where it is printed, print it with the ``raw`` filter
-  when you know it is safe there, or mark it as safe explicitly with
+  result of a macro, and the result of the ``include()`` and ``include_only()``
+  functions. Content produced in an HTML context is escaped for HTML only, so
+  printing it in a JavaScript, CSS, or URL context is unsafe; the reverse is
+  fine, as those strategies escape everything HTML needs. Produce the content in
+  the context where it is printed, print it with the ``raw`` filter when you know
+  it is safe there, or mark it as safe explicitly with
   ``new \Twig\Markup($content, $charset, ['js'])``.
 
 Macros

@@ -304,7 +304,7 @@ final class CoreExtension extends AbstractExtension
             new TwigFunction('date', [$this, 'convertDate']),
             new TwigFunction('include', [self::class, 'include'], ['needs_environment' => true, 'needs_context' => true]),
             new TwigFunction('include_only', [self::class, 'includeOnly'], ['needs_environment' => true]),
-            new TwigFunction('source', [self::class, 'source'], ['needs_environment' => true]),
+            new TwigFunction('source', [self::class, 'source'], ['needs_environment' => true, 'is_safe' => ['all']]),
             new TwigFunction('enum_cases', [self::class, 'enumCases'], ['node_class' => EnumCasesFunction::class]),
             new TwigFunction('enum', [self::class, 'enum'], ['node_class' => EnumFunction::class]),
         ];
@@ -1606,11 +1606,11 @@ final class CoreExtension extends AbstractExtension
      *
      * @internal
      */
-    public static function source(Environment $env, $name, $ignoreMissing = false): string|Markup
+    public static function source(Environment $env, $name, $ignoreMissing = false): string
     {
         $loader = $env->getLoader();
         try {
-            $source = $loader->getSourceContext($name)->getCode();
+            return $loader->getSourceContext($name)->getCode();
         } catch (LoaderError $e) {
             if (!$ignoreMissing) {
                 throw $e;
@@ -1618,11 +1618,6 @@ final class CoreExtension extends AbstractExtension
 
             return '';
         }
-
-        // the source is not compiled, so its strategy is the one its name resolves to
-        $strategy = $env->hasExtension(EscaperExtension::class) ? $env->getExtension(EscaperExtension::class)->getDefaultStrategy($name) : false;
-
-        return '' === $source ? '' : Markup::createForStrategy($source, $env->getCharset(), $strategy);
     }
 
     /**
