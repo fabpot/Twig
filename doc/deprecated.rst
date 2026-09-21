@@ -327,21 +327,33 @@ Templates
   Content escaped for one context is not escaped for another one, so Twig can
   only print it as is in a context using the strategy it was produced with.
 
-  When the content is printed where it belongs, declare that context with an
-  ``autoescape`` tag, which Twig cannot infer from the markup:
+  Migrating takes two steps, as both the producing and the printing side must
+  agree on the strategy.
+
+  On the printing side, declare the context with an ``autoescape`` tag, which
+  Twig cannot infer from the surrounding markup:
 
   .. code-block:: twig
 
     {# before, in an HTML template: a JavaScript fragment printed in an HTML context #}
     <script>{{ include('fragment.js.twig') }}</script>
 
-    {# after: the script element is a JavaScript context #}
+    {# after: the script element is declared as a JavaScript context #}
     {% autoescape 'js' %}<script>{{ include('fragment.js.twig') }}</script>{% endautoescape %}
+
+  On the producing side, the strategy is the *default* one the template was
+  compiled with, so an ``autoescape`` tag inside ``fragment.js.twig`` does not
+  change it. Make the default strategy itself be ``js``, typically by setting
+  the ``autoescape`` environment option to ``name`` and naming the template
+  ``fragment.js.twig``.
 
   Otherwise, produce the content in the context where it is printed, print it
   with the ``raw`` filter when you know it is safe there, or mark a value coming
   from PHP as safe explicitly with
   ``new \Twig\Markup($content, $charset, ['js'])``.
+
+  The ``block()`` and ``parent()`` functions are not covered: their result stays
+  safe for every strategy.
 
 Macros
 ------
