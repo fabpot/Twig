@@ -48,22 +48,6 @@ returns a ``\Twig\TemplateWrapper`` instance::
 
     $template = $twig->load('index.html.twig');
 
-.. versionadded:: 3.30
-
-    The ``TemplateWrapper::getDefaultEscapeStrategy()`` method was introduced in
-    Twig 3.30.
-
-The wrapper tells which escaping strategy the body of the template was compiled
-with (``false`` when the template is not autoescaped)::
-
-    $strategy = $template->getDefaultEscapeStrategy();
-
-.. caution::
-
-    This describes the template's own source, not its output: ``autoescape``,
-    ``escape``, and anything rendered by a parent, embedded, or included
-    template can use another strategy.
-
 Rendering Templates
 -------------------
 
@@ -543,10 +527,16 @@ The escaping rules are implemented as follows:
         $escaper->addSafeClass('HtmlGenerator', ['all']);
 
   A class marked safe for ``html_attr`` is also safe for ``html_attr_relaxed``
-  and ``html``, as ``html_attr`` escaping is stricter than both.
+  and ``html``, and a class marked safe for ``html_attr_relaxed`` is also safe
+  for ``html``, as the stricter escaping covers the looser contexts.
 
 * A single value can be marked as safe for some strategies when it is created,
   without registering its class:
+
+  .. versionadded:: 3.30
+
+      The third argument of the ``Twig\Markup`` constructor was added in Twig
+      3.30.
 
   .. code-block:: php
 
@@ -567,15 +557,27 @@ The escaping rules are implemented as follows:
 * An extension that renders a template and returns its output should mark that
   output with the strategy the template was compiled with:
 
+  .. versionadded:: 3.30
+
+      The ``Markup::createForStrategy()`` and
+      ``TemplateWrapper::getDefaultEscapeStrategy()`` methods were added in Twig
+      3.30.
+
   .. code-block:: php
 
         $template = $twig->load('widget.html.twig');
 
         return \Twig\Markup::createForStrategy($template->render($context), $twig->getCharset(), $template->getDefaultEscapeStrategy());
 
+  ``getDefaultEscapeStrategy()`` returns the strategy the template body was
+  compiled with, or ``false`` when the template is not autoescaped; parts coming
+  from a parent template, an embedded template, or an ``autoescape`` tag can use
+  another one.
+
   Such content is safe in a context using that strategy, and escaped in any
   other one: content escaped for JavaScript is not safe in a CSS context. This
-  is how the ``include()`` function marks its result.
+  is how the ``include()`` function marks its result. Until Twig 4.0, printing
+  it in a context using another strategy only triggers a deprecation notice.
 
 * Escaping is applied before printing, after any other filter is applied:
 
