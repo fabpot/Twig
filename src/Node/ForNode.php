@@ -159,14 +159,14 @@ class ForNode extends Node
             return true;
         }
 
-        // an arrow function sets its arguments in its own copy of the context
-        if ($node instanceof ArrowFunctionExpression) {
-            return false;
-        }
-
         // the compiled code of a tag that Twig does not know could change the context
         if (!$node instanceof AbstractExpression && (!str_starts_with($node::class, 'Twig\\') || str_contains($node::class, '@anonymous'))) {
             return true;
+        }
+
+        // arrow functions and the with tag set variables in their own copy of the context
+        if ($node instanceof ArrowFunctionExpression || $node instanceof WithNode) {
+            return false;
         }
 
         foreach ($node as $name => $child) {

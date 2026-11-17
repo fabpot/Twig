@@ -289,6 +289,23 @@ unset(\$context['_key'], \$context['item']);
 unset(\$_v0, \$_v1);
 EOF, $env];
 
+        // variables set in a with tag are discarded at its end
+        $env = new Environment(new ArrayLoader(['index' => '{% for item in items %}{% with %}{% set foo = item %}{% endwith %}{% endfor %}']));
+        $node = $env->parse($env->tokenize($env->getLoader()->getSourceContext('index')))->getNode('body');
+
+        $tests[] = [$node, <<<EOF
+// line 1
+\$_v0 = {$itemsGetter};
+\$_v1 = \$context;
+foreach (\\is_array(\$_v0) || \$_v0 instanceof \\Traversable ? \$_v0 : [] as \$context["_key"] => \$context["item"]) {
+    \$_v2 = \$context;
+    \$context["foo"] = \$context["item"];
+    \$context = \$_v2;
+}
+\$context = \$_v1;
+unset(\$_v0, \$_v1);
+EOF, $env];
+
         $env = new Environment(new ArrayLoader(['index' => '{% for item in items %}{{ loop(item) }}{% set foo = item %}{% endfor %}']));
         $node = $env->parse($env->tokenize($env->getLoader()->getSourceContext('index')))->getNode('body');
 
